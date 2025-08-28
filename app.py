@@ -36,15 +36,27 @@ QUESTIONS = [
 TRIAL_CATEGORIES = [
     [
         ('walk-low-weight.bvh', 'walk-high-weight.bvh'),
+        ('wave-low-weight.bvh', 'wave-high-weight.bvh'),
+        ('sit-low-weight.bvh', 'sit-high-weight.bvh'),
+        ('put-low-weight.bvh', 'put-high-weight.bvh'),
     ],
     [
         ('walk-low-space.bvh', 'walk-high-space.bvh'),
+        ('wave-low-space.bvh', 'wave-high-space.bvh'),
+        ('sit-low-space.bvh', 'sit-high-space.bvh'),
+        ('put-low-space.bvh', 'put-high-space.bvh'),
     ],
     [
         ('walk-low-time.bvh', 'walk-high-time.bvh'),
+        ('wave-low-time.bvh', 'wave-high-time.bvh'),
+        ('sit-low-time.bvh', 'sit-high-time.bvh'),
+        ('put-low-time.bvh', 'put-high-time.bvh'),
     ],
     [
         ('walk-low-flow.bvh', 'walk-high-flow.bvh'),
+        ('wave-low-flow.bvh', 'wave-high-flow.bvh'),
+        ('sit-low-flow.bvh', 'sit-high-flow.bvh'),
+        ('put-low-flow.bvh', 'put-high-flow.bvh'),
     ],
 ]
 # For a real study, you would populate these with the actual BVH file pairs for each category.
@@ -176,7 +188,8 @@ def run_trial(trial_num):
         total_trials=TOTAL_TRIALS,
         motion_left=motion_left,
         motion_right=motion_right,
-        questions=QUESTIONS
+        questions=QUESTIONS,
+        mod_no=mod_no
     )
 
 @app.route('/complete')

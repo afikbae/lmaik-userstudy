@@ -1,0 +1,2850 @@
+Repository Structure (lmaik-userstudy):
+├── .gitignore
+├── app.py
+├── deployment-scripts
+│   ├── deploy.sh
+│   ├── logs.sh
+│   ├── README.md
+│   ├── restart.sh
+│   └── status.sh
+├── index.html
+├── README.md
+├── Realism Personality.html
+├── requirements.txt
+├── results
+│   └── study_results.csv
+├── static
+│   ├── css
+│   │   └── style.css
+│   └── js
+│       └── visualization.js
+└── templates
+    ├── complete.html
+    ├── layout.html
+    ├── login.html
+    ├── results.html
+    └── trial.html
+---
+--- requirements.txt ---
+Flask
+
+--- app.py ---
+# app.py
+
+from flask import Flask, render_template, request, redirect, url_for, session, abort, send_file
+import os
+import csv
+from datetime import datetime
+import random
+
+app = Flask(__name__)
+# This secret key is crucial for session management. Change it to something random and secret.
+app.secret_key = 'your_super_secret_key_for_user_study'
+
+# --- Configuration ---
+QUESTIONS = [
+    "Which motion appears more extraverted, enthusiastic?",
+    "Which motion appears more critical, quarrelsome?",
+    "Which motion appears more dependable, self-disciplined?",
+    "Which motion appears more anxious, easily upset?",
+    "Which motion appears more open to new experiences, complex?",
+    "Which motion appears more reserved, quiet?",
+    "Which motion appears more sympathetic, warm?",
+    "Which motion appears more disorganized, careless?",
+    "Which motion appears more calm, emotionally stable?",
+    "Which motion appears more conventional, uncreative?",
+    "Which motion appears happier?",
+    "Which motion appears sadder?",
+    "Which motion appears more afraid?",
+    "Which motion appears more disgusted?",
+    "Which motion appears angrier?",
+    "Which motion appears more surprised?",
+    "Which motion appears more human-like, natural?",
+]
+
+# Define the pairs of motions, now grouped into categories (parts).
+# Each trial will randomly select one pair from its corresponding category.
+TRIAL_CATEGORIES = [
+    [
+        ('walk-low-weight.bvh', 'walk-high-weight.bvh'),
+    ],
+    [
+        ('walk-low-space.bvh', 'walk-high-space.bvh'),
+    ],
+    [
+        ('walk-low-time.bvh', 'walk-high-time.bvh'),
+    ],
+    [
+        ('walk-low-flow.bvh', 'walk-high-flow.bvh'),
+    ],
+]
+# For a real study, you would populate these with the actual BVH file pairs for each category.
+
+TOTAL_TRIALS = len(TRIAL_CATEGORIES)
+RESULTS_FILE = os.path.join('results', 'study_results.csv')
+
+# Ensure the results directory exists
+os.makedirs('results', exist_ok=True)
+
+# --- Routes ---
+
+@app.route('/')
+def index():
+    # Redirect to the main study page
+    return redirect(url_for('user_study'))
+
+@app.route('/userstudy', methods=['GET', 'POST'])
+def user_study():
+    if request.method == 'POST':
+        prolific_id = request.form.get('prolific_id')
+        if not prolific_id:
+            return render_template('login.html', error="Prolific ID cannot be empty.")
+        
+        session['prolific_id'] = prolific_id
+        session['current_trial'] = 1 # Start with the first trial
+        
+        # You could also shuffle your trial pairs here if needed
+        # random.shuffle(TRIAL_PAIRS) 
+        # session['trial_pairs'] = TRIAL_PAIRS
+        
+        return redirect(url_for('run_trial', trial_num=1))
+        
+    # On GET, just show the login page
+    return render_template('login.html')
+
+@app.route('/trial/<int:trial_num>', methods=['GET', 'POST'])
+def run_trial(trial_num):
+    # Security checks: ensure user has a session and is on the correct trial
+    if 'prolific_id' not in session:
+        return redirect(url_for('user_study'))
+    if trial_num != session.get('current_trial'):
+        # Prevent users from skipping trials or going back
+        return redirect(url_for('run_trial', trial_num=session['current_trial']))
+
+    # --- POST: User has submitted the form ---
+    if request.method == 'POST':
+        # Calculate time taken for the trial
+        time_taken = 'N/A'
+        if 'trial_start_time' in session:
+            start_time = datetime.fromisoformat(session['trial_start_time'])
+            end_time = datetime.now()
+            time_taken = round((end_time - start_time).total_seconds(), 2)
+
+        # Construct the 'R' string as per Realism Personality.html format
+        # Map string choices to numerical values (0, 1, 2)
+        choice_mapping = {
+            'Left': 0,
+            'Equal': 1,
+            'Right': 2,
+            'N/A': -1 # Should not happen due to 'required' attribute
+        }
+        answers_numerical = {}
+        for i in range(1, 18):
+            form_value = request.form.get(f'q{i}', 'N/A')
+            answers_numerical[f'q{i}'] = choice_mapping.get(form_value, -1)
+        
+        # Construct the 'R' string as per Realism Personality.html format
+        choices_string = ",".join(str(answers_numerical[f'q{i}']) for i in range(1, 18))
+        
+        # Convert is_reversed boolean to 0 or 1
+        is_reversed_int = 1 if session.get('is_reversed', False) else 0
+
+        r_string = (
+            f"modNo:{session.get('current_mod_no', 'N/A')}"
+            f"#buttonChoices:{choices_string}"
+            f"#time:{time_taken}"
+            f"#isreverse:{is_reversed_int}"
+        )
+
+        row = {
+            'PID': session['prolific_id'],
+            'SNO': trial_num, # SNO seems to be the trial number/category
+            'R': r_string
+        }
+        
+        # Write to CSV
+        file_exists = os.path.isfile(RESULTS_FILE)
+        with open(RESULTS_FILE, 'a', newline='') as csvfile:
+            fieldnames = row.keys()
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            if not file_exists:
+                writer.writeheader()
+            writer.writerow(row)
+        
+        # --- Move to the next trial ---
+        session['current_trial'] += 1
+        return redirect(url_for('run_trial', trial_num=session['current_trial']))
+
+    # --- GET: Display the trial page ---
+    if trial_num > TOTAL_TRIALS:
+        return redirect(url_for('complete'))
+
+    # Store trial start time in session
+    session['trial_start_time'] = datetime.now().isoformat()
+
+    # Get the category of pairs for the current trial
+    category_pairs = TRIAL_CATEGORIES[trial_num - 1]
+    
+    # Randomly select a pair from the category and store its index
+    mod_no = random.randrange(len(category_pairs))
+    session['current_mod_no'] = mod_no
+    motion_pair_for_trial = category_pairs[mod_no]
+
+    # Randomly decide whether to swap the motions and store the decision
+    motion_left, motion_right = motion_pair_for_trial
+    is_reversed = random.choice([True, False])
+    session['is_reversed'] = is_reversed
+    if is_reversed:
+        motion_left, motion_right = motion_right, motion_left
+    
+    # Store the actual motions shown in the session to ensure we save the correct data on POST
+    session['motion_left'] = motion_left
+    session['motion_right'] = motion_right
+
+    return render_template(
+        'trial.html',
+        trial_num=trial_num,
+        total_trials=TOTAL_TRIALS,
+        motion_left=motion_left,
+        motion_right=motion_right,
+        questions=QUESTIONS
+    )
+
+@app.route('/complete')
+def complete():
+    # A simple "Thank You" page
+    prolific_id = session.get('prolific_id', 'Participant')
+    
+    # Clear the session so they can't go back
+    session.clear() 
+    
+    return render_template('complete.html', prolific_id=prolific_id)
+
+
+@app.route('/results')
+def show_results():
+    results = []
+    header = []
+    if os.path.isfile(RESULTS_FILE):
+        with open(RESULTS_FILE, 'r', newline='') as csvfile:
+            try:
+                reader = csv.reader(csvfile)
+                header = next(reader)
+                results = list(reader)
+            except StopIteration:
+                # Handle empty file
+                pass
+    return render_template('results.html', header=header, results=results)
+
+
+@app.route('/download_csv')
+def download_csv():
+    try:
+        return send_file(
+            RESULTS_FILE,
+            mimetype='text/csv',
+            as_attachment=True,
+            download_name='study_results.csv'
+        )
+    except FileNotFoundError:
+        abort(404)
+
+
+if __name__ == '__main__':
+    app.run(debug=True)
+
+--- Realism Personality.html ---
+<!DOCTYPE html>
+<html>
+	<head>
+		<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+		<script src="https://code.jquery.com/ui/1.13.2/jquery-ui.js"></script>
+		<link rel="stylesheet" href="https://code.jquery.com/ui/1.11.0/themes/smoothness/jquery-ui.css">
+
+		<meta charset="utf-8">
+		<title>Realism Personality</title>
+		<style>
+			#customers {
+			  font-family: Arial, Helvetica, sans-serif;
+			  border-collapse: collapse;
+			  width: 100%;
+			}
+			
+			#customers td, #customers th {
+			  border: 1px solid #ddd;
+			  padding: 8px;
+			}
+			
+			#customers tr:nth-child(even){background-color: #f2f2f2;}
+			
+			#customers tr:hover {background-color: #ddd;}
+			
+			#customers th {
+			  padding-top: 12px;
+			  padding-bottom: 12px;
+			  text-align: left;
+			  background-color: #04AA6D;
+			  color: white;
+			}
+		</style>
+	</head>
+
+	<body>
+		<h1>Personality Data:</h1>
+		<div id="results0"></div>
+		
+		<h1>CSV Download Links:</h1>
+		
+		<script type="module">
+
+			function saveCSV(ourData,name) {
+				const titleKeys = Object.keys(ourData[0]);
+
+				const refinedData = [];
+				refinedData.push(titleKeys);
+
+				ourData.forEach(item => {
+					refinedData.push(Object.values(item))  
+				});
+
+				let csvContent = '';
+
+				refinedData.forEach(row => {
+					csvContent += row.join(',') + '\n'
+				});
+
+				const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8,' });
+				const objUrl = URL.createObjectURL(blob);
+
+				const link = document.createElement('a');
+				link.setAttribute('href', objUrl);
+				link.setAttribute('download', 'File.csv');
+				link.textContent = 'CSV Download for ' + name;
+				document.querySelector('body').append(link);
+				const h1 = document.createElement('h1');
+				document.querySelector('body').append(h1);
+			}
+			
+			// jQuery part
+			$(document).ready(function(){
+
+				$.ajax({
+					url : "get_prolific_data.php",
+					type: "POST",
+					data : "experimentno=3",
+					success: function(data,status, xhr)
+					{
+						if(data) {
+							var json_data = JSON.parse(data);
+
+							var txt = "<table id=\"customers\"><th>PID</th><th>SNO</th><th>R</th>";
+				
+							for(var i in json_data) {
+								txt += "<tr>";
+								txt += "<td>" + json_data[i]["PID"] + "</td>";
+								txt += "<td>" + json_data[i]["SNO"] + "</td>";
+								txt += "<td>" + json_data[i]["R"] + "</td>";
+								txt += "</tr>";
+							}
+
+							txt += "</table>";
+
+							
+							saveCSV(json_data, "experiment");
+
+							document.getElementById("results0").innerHTML = txt;
+							
+						} else {
+							document.getElementById("results0").innerHTML = "problem?";
+						}
+					},
+					error: function (jqXHR, status, errorThrown)
+					{
+
+					}
+				});
+
+			});
+		</script>
+	</body>
+</html>
+
+
+
+
+--- .gitignore ---
+Realism Personality.html
+lmaik.pem
+index.html
+results
+__pycache__
+
+--- README.md ---
+# lmaik-userstudy
+
+
+--- index.html ---
+<!DOCTYPE html>
+<html>
+	<head>
+		<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+		<script src="https://code.jquery.com/ui/1.13.2/jquery-ui.js"></script>
+		<link rel="stylesheet" href="https://code.jquery.com/ui/1.11.0/themes/smoothness/jquery-ui.css">
+
+		<meta charset="utf-8">
+		<title>Animated Personality</title>
+
+		<style>
+			*{
+			-webkit-user-select: none; /* Safari */
+			-ms-user-select: none; /* IE 10 and IE 11 */
+			user-select: none; /* Standard syntax */
+			}
+			html { visibility:hidden; }
+
+			.slidecontainer {
+			  width: 100%;
+			}
+			
+			.slider2 {
+			  -webkit-appearance: none;
+			  height: 10px;
+			  width: 100%;
+			  background-image: linear-gradient(to right, gray,lightblue, gray);
+			  outline: none;
+			  opacity: 0.7;
+			  -webkit-transition: .2s;
+			  transition: opacity .2s;
+			}
+
+			.fillScreen {
+				position:relative;
+				top:0;
+				left:0;
+				height:100%;
+				width:100%;
+			}
+
+			input.largerCheckbox {
+				width: 18px;
+				height: 18px;
+			}
+
+			.slider {
+			  -webkit-appearance: none;
+			  width: 100%;
+			  height: 20px;
+			  
+			  outline: none;
+			  opacity: 0.7;
+			  -webkit-transition: .2s;
+			  transition: opacity .2s;
+			}
+			
+			.slider:hover {
+			  opacity: 1;
+			}
+
+			.slider2:hover {
+			  opacity: 1;
+			}
+
+			.slider2::-webkit-slider-thumb {
+			  -webkit-appearance: none;
+			  appearance: none;
+			  width: 20px;
+			  height: 20px;
+			  background: #000620;
+			  cursor: pointer;
+			}
+			
+			.slider::-webkit-slider-thumb {
+			  -webkit-appearance: none;
+			  appearance: none;
+			  width: 20px;
+			  height: 20px;
+			  background: #000000;
+			  cursor: pointer;
+			}
+
+			.slider2::-moz-range-thumb {
+			  width: 20px;
+			  height: 20px;
+			  background: #000620;
+			  cursor: pointer;
+			}
+			
+			.slider::-moz-range-thumb {
+			  width: 20px;
+			  height: 20px;
+			  background: #000000;
+			  cursor: pointer;
+			}
+
+			/* Container */
+			.container{
+				width:40%;
+				margin: auto;
+			}
+
+			/* Login */
+			#div_login{
+				border: 1px solid gray;
+				border-radius: 3px;
+				width: 500px;
+				box-shadow: 0px 2px 2px 0px  gray;
+				margin: 0 auto;
+			}
+
+			#div_login h1{
+				margin-top: 0px;
+				padding: 10px;
+				background-color: cornflowerblue;
+				color: white;
+				text-align: center;
+			}
+
+			#div_login div{
+				clear: both;
+				margin-top: 2px;
+				padding: 12px;
+			}
+
+			#div_login .textbox{
+				width: 70%;
+				padding: 8px;
+			}
+
+			#div_login input[type=submit]{
+				padding: 7px;
+				width: 150px;
+			}
+
+			.center {
+				position: absolute;
+				left: 50%;
+				top: 50%;
+				-webkit-transform: translate(-50%, -50%);
+				transform: translate(-50%, -50%);
+			}
+
+			.center-full {
+				width:100%;
+				margin: auto;
+				background-color: #ffffff;
+				text-align: center;
+			}
+
+			.big-button {
+				font-size: 18px;
+				border-radius: 8px;
+				border-color: #bbbbbb;
+				background-color: #ffffff;
+			}
+
+			.big-button:hover {
+				font-size: 18px;
+				color: #383838;
+				border-radius: 8px;
+				border-color: #747474;
+				background-color: #cacaca;
+			}
+
+			.big-button:active {
+				font-size: 18px;
+				color: #184d00;
+				border-radius: 8px;
+				border-color: #0c6909;
+				background-color: #969696;
+			}
+
+			.descriptor{
+				background-color: gainsboro;
+			}
+
+			input[type=range][orient=vertical] {
+				appearance: slider-vertical;
+				width: 8px;
+				height: 100%;
+				padding: 0 5px;
+			}
+		</style>
+	</head>
+
+	<body>
+		<div id="status_text"></div>
+
+		<div id="welcome-div">
+			<h2 style="text-align: center;">Animation Personality</h2>
+			<p style="text-align: left;">In this study, we compare the influence of different motion cues on perceived personality of animated characters.</p>
+			<p style="text-align: left;">In each task, you will be presented with two videos showing animated stick figures. You will choose your answers to the questions comparing personality and emotions expressed by the animations using the buttons under the video. You may choose left, equal, or right as your answer.</p>
+			<p style="text-align: left;">The videos will loop as you choose your answeres. You cannot return to the same task after submitting. The study involves 4 randomly selected tasks. After submitting the last task, you will be directed to the completion page.</p>
+			<p><button id="begin-button" class="big-button">Begin</button></p>
+		</div>
+
+		<div id="complete-div" class="center" style="display: none;">
+			<h2 style="text-align: center;">Animation Personality</h2>
+			<p style="text-align: center;">Thank you for completing our study. Please click on the following link to redirect to the completion page:</p>
+			<p><a href="https://app.prolific.com/submissions/complete?cc=CW4ANVW1">https://app.prolific.com/submissions/complete?cc=CW4ANVW1</a></p>
+			<p>Code: <input value="CW4ANVW1" disabled></p>
+		</div>
+
+		<div id="study-div" style="text-align:center; display: none;">
+			<div id="info-part-load"><p>Please click <input id="load-sample" type="button" class="big-button" value="Load Sample"/> to load & watch the samples. Then, answer the questions that appear below.</p></div>
+
+			<div id="video-table">
+				<table style="margin: auto; table-layout:fixed; text-align:center; width: 810px; height: 540px;">
+					<tr>
+						<td>
+							<div id="video-player-div" style="margin: auto;  width: 400px; height: 540px;"></div>
+						</td>
+						<td>
+							<div id="video-player-div-2" style="margin: auto;  width: 400px; height: 540px;"></div>
+						</td>
+					</tr>
+				</table>
+			</div>
+
+			<div id="question-table" style="overflow-y: scroll; margin: auto; width: 70%; height:240px; background-color: rgb(227, 231, 207);">
+				<p>You may choose left, equal, or right as your answer.</p>
+				<hr>
+				<p>1. Which motion appears more extraverted, enthusiastic?</p>
+				<p>
+					<input id="left-button-1" type="button" class="big-button" value="Left" disabled/>
+					<input id="equal-button-1" type="button" class="big-button" value="Equal" disabled/>
+					<input id="right-button-1" type="button" class="big-button" value="Right" disabled/>
+				</p>
+				<hr>
+				<p>2. Which motion appears more critical, quarrelsome?</p>
+				<p>
+					<input id="left-button-2" type="button" class="big-button" value="Left" disabled/>
+					<input id="equal-button-2" type="button" class="big-button" value="Equal" disabled/>
+					<input id="right-button-2" type="button" class="big-button" value="Right" disabled/>
+				</p>
+				<hr>
+				<p>3. Which motion appears more dependable, self-disciplined?</p>
+				<p>
+					<input id="left-button-3" type="button" class="big-button" value="Left" disabled/>
+					<input id="equal-button-3" type="button" class="big-button" value="Equal" disabled/>
+					<input id="right-button-3" type="button" class="big-button" value="Right" disabled/>
+				</p>
+				<hr>
+				<p>4. Which motion appears more anxious, easily upset?</p>
+				<p>
+					<input id="left-button-4" type="button" class="big-button" value="Left" disabled/>
+					<input id="equal-button-4" type="button" class="big-button" value="Equal" disabled/>
+					<input id="right-button-4" type="button" class="big-button" value="Right" disabled/>
+				</p>
+				<hr>
+				<p>5. Which motion appears more open to new experiences, complex?</p>
+				<p>
+					<input id="left-button-5" type="button" class="big-button" value="Left" disabled/>
+					<input id="equal-button-5" type="button" class="big-button" value="Equal" disabled/>
+					<input id="right-button-5" type="button" class="big-button" value="Right" disabled/>
+				</p>
+				<hr>
+				<p>6. Which motion appears more reserved, quiet?</p>
+				<p>
+					<input id="left-button-6" type="button" class="big-button" value="Left" disabled/>
+					<input id="equal-button-6" type="button" class="big-button" value="Equal" disabled/>
+					<input id="right-button-6" type="button" class="big-button" value="Right" disabled/>
+				</p>
+				<hr>
+				<p>7. Which motion appears more sympathetic, warm?</p>
+				<p>
+					<input id="left-button-7" type="button" class="big-button" value="Left" disabled/>
+					<input id="equal-button-7" type="button" class="big-button" value="Equal" disabled/>
+					<input id="right-button-7" type="button" class="big-button" value="Right" disabled/>
+				</p>
+				<hr>
+				<p>8. Which motion appears more disorganized, careless?</p>
+				<p>
+					<input id="left-button-8" type="button" class="big-button" value="Left" disabled/>
+					<input id="equal-button-8" type="button" class="big-button" value="Equal" disabled/>
+					<input id="right-button-8" type="button" class="big-button" value="Right" disabled/>
+				</p>
+				<hr>
+				<p>9. Which motion appears more calm, emotionally stable?</p>
+				<p>
+					<input id="left-button-9" type="button" class="big-button" value="Left" disabled/>
+					<input id="equal-button-9" type="button" class="big-button" value="Equal" disabled/>
+					<input id="right-button-9" type="button" class="big-button" value="Right" disabled/>
+				</p>
+				<hr>
+				<p>10. Which motion appears more conventional, uncreative?</p>
+				<p>
+					<input id="left-button-10" type="button" class="big-button" value="Left" disabled/>
+					<input id="equal-button-10" type="button" class="big-button" value="Equal" disabled/>
+					<input id="right-button-10" type="button" class="big-button" value="Right" disabled/>
+				</p>
+				<hr>
+				<p>11. Which motion appears happier?</p>
+				<p>
+					<input id="left-button-11" type="button" class="big-button" value="Left" disabled/>
+					<input id="equal-button-11" type="button" class="big-button" value="Equal" disabled/>
+					<input id="right-button-11" type="button" class="big-button" value="Right" disabled/>
+				</p>
+				<hr>
+				<p>12. Which motion appears sadder?</p>
+				<p>
+					<input id="left-button-12" type="button" class="big-button" value="Left" disabled/>
+					<input id="equal-button-12" type="button" class="big-button" value="Equal" disabled/>
+					<input id="right-button-12" type="button" class="big-button" value="Right" disabled/>
+				</p>
+				<hr>
+				<p>13. Which motion appears more afraid?</p>
+				<p>
+					<input id="left-button-13" type="button" class="big-button" value="Left" disabled/>
+					<input id="equal-button-13" type="button" class="big-button" value="Equal" disabled/>
+					<input id="right-button-13" type="button" class="big-button" value="Right" disabled/>
+				</p>
+				<hr>
+				<p>14. Which motion appears more disgusted?</p>
+				<p>
+					<input id="left-button-14" type="button" class="big-button" value="Left" disabled/>
+					<input id="equal-button-14" type="button" class="big-button" value="Equal" disabled/>
+					<input id="right-button-14" type="button" class="big-button" value="Right" disabled/>
+				</p>
+				<hr>
+				<p>15. Which motion appears angrier?</p>
+				<p>
+					<input id="left-button-15" type="button" class="big-button" value="Left" disabled/>
+					<input id="equal-button-15" type="button" class="big-button" value="Equal" disabled/>
+					<input id="right-button-15" type="button" class="big-button" value="Right" disabled/>
+				</p>
+				<hr>
+				<p>16. Which motion appears more surprised?</p>
+				<p>
+					<input id="left-button-16" type="button" class="big-button" value="Left" disabled/>
+					<input id="equal-button-16" type="button" class="big-button" value="Equal" disabled/>
+					<input id="right-button-16" type="button" class="big-button" value="Right" disabled/>
+				</p>
+				<hr>
+				<p>17. Which motion appears more human-like, natural?</p>
+				<p>
+					<input id="left-button-17" type="button" class="big-button" value="Left" disabled/>
+					<input id="equal-button-17" type="button" class="big-button" value="Equal" disabled/>
+					<input id="right-button-17" type="button" class="big-button" value="Right" disabled/>
+				</p>
+				<hr>
+				<p><input id="submit-button" type="button" class="big-button" value="      Submit      " disabled/></p>
+			</div>
+
+			
+		</div>
+
+		<div id="remaining-task"></div>
+
+		<script>
+			var currentEmail = -1;
+			var currentExperimentNo = 3;
+			var currentSampleNo = -1;
+			var currentModNo = -1;
+			var buttonChoices = [-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1];
+
+			var startTime, endTime;
+
+			var videoName;
+			var videoName2;
+			var videoReversed = false;
+
+			var variation_count = 4;
+
+			// 4 efforts(weight, time, space, flow), 7 alternatives, and 2 samples (low-high)
+			var videoNames = [
+				[ // weight category
+					["qnVJm5zXwNE","kLWEmF2_IIA"], // 3
+					["f8NGIdaiWis","ydJCWMpLC5Y"], // 5
+					["4fFpt0vkkYQ","iqz0RjNWpk4"], // 6
+					["Dgt8OTod_wg","xLOoptO98DU"]  // 7
+				],
+				[ // time category
+					["YxOSZNe9_vM","G0OlhNDZRnI"], // 3
+					["Zv0ifBChQq4","d9b5OuGDSkY"], // 5
+					["i6hH57ajKwk","IR8oz040Vw0"], // 6
+					["nXLPj-2G7P4","dOhq1-TVQT0"]  // 7
+				],
+				[ // space category
+					["zEOOPDR-O7c","nYCiSoCUnAM"], // 3
+					["XE5m7jdWtQs","hUuyzXQ2YDI"], // 5
+					["GzNzUkRQkoI","87LVRAIZCBo"], // 6
+					["oHEUnGO6GOw","TcW3myoi_Bk"]  // 7
+				],
+				[ // flow category
+					["q0o4MK8r-tw","NPnoV1F4Oe0"], //3
+					["bYhMGGMYWiE","2IZTlJ_qlpU"], // 5
+					["yXL1U_mU2vo","EY3yq1eWGec"], // 6
+					["YJd9Adp734w","pRVay6BQr4c"]  // 7
+				]
+			];
+
+			// YouTube API part
+			var player;
+			var player2;
+			var tag = document.createElement('script');
+			tag.src = "https://www.youtube.com/iframe_api";
+			var firstScriptTag = document.getElementsByTagName('script')[0];
+			firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+
+			function onYouTubeIframeAPIReady() {
+				player = new YT.Player('video-player-div', {
+					playerVars: {
+						'playsinline': 1,
+						'modestbranding' : 1,
+						'rel' : 0,
+						'showinfo' : 0,
+						//'autoplay' : 0
+					},
+					events: {
+						// 'onReady': onPlayerReady,
+						'onStateChange': onPlayerStateChange
+					}
+				});
+				
+				player2 = new YT.Player('video-player-div-2', {
+					playerVars: {
+						'playsinline': 1,
+						'modestbranding' : 1,
+						'rel' : 0,
+						'showinfo' : 0,
+						//'autoplay' : 0
+					},
+					events: {
+						// 'onReady': onPlayerReady,
+						'onStateChange': onPlayerStateChange2
+					}
+				});
+			}
+
+			function onPlayerStateChange(event) {
+				if (event.data === YT.PlayerState.ENDED) {
+					player.playVideo(); 
+				}
+			}
+
+			function onPlayerStateChange2(event) {
+				if (event.data === YT.PlayerState.ENDED) {
+					player2.playVideo(); 
+				}
+			}
+
+
+			function timeStart() {
+				startTime = new Date();
+			};
+
+			function timeEnd() {
+				endTime = new Date();
+				var timeDiff = endTime - startTime;
+				timeDiff /= 1000;
+				var seconds = Math.round(timeDiff);
+				return seconds;
+			}
+
+			function reset() {
+				watched = false;
+				buttonChoices = [-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1];
+				currentSampleNo = -1;
+				currentModNo = -1;
+				
+				resetCompareButtons();
+
+				for (let i = 1; i <= 17; i++) {
+					$('#left-button-' + i).attr("disabled", true);
+					$('#equal-button-' + i).attr("disabled", true);
+					$('#right-button-' + i).attr("disabled", true);
+				}
+
+				$('#submit-button').attr("disabled", true);
+
+				document.getElementById("info-part-load").removeAttribute("hidden");
+
+				document.getElementById("video-player-div").setAttribute("hidden", "hidden");
+				document.getElementById("video-player-div-2").setAttribute("hidden", "hidden");
+				document.getElementById("video-table").setAttribute("hidden", "hidden");
+				document.getElementById("question-table").setAttribute("hidden", "hidden");
+				
+				document.getElementById('load-sample').style.borderColor = "";
+				document.getElementById('load-sample').style.backgroundColor = "";
+				
+				if (typeof YT !== 'undefined' && YT.loaded && (typeof player.loadVideoById === 'function') && (typeof player2.loadVideoById === 'function')) {
+					player.stopVideo();
+					player.loadVideoById({'videoId': ''});
+					player2.stopVideo();
+					player2.loadVideoById({'videoId': ''});
+				}
+			}
+
+			function handleRefresh() {
+				var usermail = sessionStorage.getItem("usermail");
+				var pagename = sessionStorage.getItem("pagename");
+				var userflag = false;
+				var postData = 'usermail='+usermail;
+
+				if(usermail) {
+					if(/^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/.test(usermail)) {
+						$.ajax({
+							url : "logic_login.php",
+							type: "POST",
+							data : postData,
+							success: function(data,status, xhr) {
+								
+								var dataArray = data.split("|");
+								if(dataArray.length == 1) {
+									sessionStorage.setItem("usermail", dataArray[0]);
+									userflag = true;
+								}
+								else if (dataArray.length == 2) {
+									sessionStorage.setItem("usermail", dataArray[0]);
+									userflag = true;
+								}
+								
+								if(userflag) {
+									if(pagename == "home") {
+										homeFromAny();
+									} else if(pagename == "ex0") {
+										homeFromAny();
+										afterMainEx0();
+									} else if(pagename == "ex1") {
+										homeFromAny();
+										afterMainEx1();
+									} else if(pagename == "ex2") {
+										homeFromAny();
+										afterMainEx2();
+									} else if(pagename == "ex4") {
+										homeFromAny();
+										afterMainEx4();
+									}
+									else if(pagename == "demo") {
+										afterLoginDemographics();
+									}
+								}
+
+								document.getElementsByTagName("html")[0].style.visibility = "visible";
+							},
+							error: function (jqXHR, status, errorThrown) {
+								$("#status_text").html('there was an error ' + errorThrown + ' with status ' + status);
+								document.getElementsByTagName("html")[0].style.visibility = "visible";
+							}
+						});
+					}
+					else{
+						return true;
+					}
+				}
+				else{
+					return true;
+				}
+			}
+
+			function resetCompareButtons() {
+				for (let i = 1; i <= 17; i++) {
+					document.getElementById('left-button-'+i).style.borderColor = "";
+					document.getElementById('left-button-'+i).style.backgroundColor = "";
+					document.getElementById('equal-button-'+i).style.borderColor = "";
+					document.getElementById('equal-button-'+i).style.backgroundColor = "";
+					document.getElementById('right-button-'+i).style.borderColor = "";
+					document.getElementById('right-button-'+i).style.backgroundColor = "";	
+				}
+			}
+
+			function resetCompareButton(i) {
+				document.getElementById('left-button-'+i).style.borderColor = "";
+				document.getElementById('left-button-'+i).style.backgroundColor = "";
+				document.getElementById('equal-button-'+i).style.borderColor = "";
+				document.getElementById('equal-button-'+i).style.backgroundColor = "";
+				document.getElementById('right-button-'+i).style.borderColor = "";
+				document.getElementById('right-button-'+i).style.backgroundColor = "";	
+			
+			}
+
+			function serverProblemFromAny() {
+				$("#status_text").html('there was an error ' + errorThrown + ' with status ' + status);
+				alert("Server error, returning to homepage, please try again.");
+			}
+
+			function prepareForSample() {
+				reset();
+
+				var currentUrl = window.location.href;
+				if(currentUrl.includes('?')) {
+					var info = currentUrl.split("?")[1];
+					var pid = info.split("&")[0];
+					currentEmail = pid.split("=")[1];
+
+					var postData = 'usermail='+currentEmail+'&experimentno='+currentExperimentNo;
+					console.log(postData);
+
+					// now we have current email, determine sample
+					$.ajax({
+						url : "get_next_sample_random.php",
+						type: "POST",
+						data : postData,
+						success: function(data,status, xhr)
+						{
+							if(data) {
+								if(data == "e") {
+									// no more left, you completed the experiment!
+									console.log("e");
+									document.getElementById('welcome-div').style.display = "none";
+									document.getElementById('study-div').style.display = "none";
+									document.getElementById('complete-div').style.display = "block";
+								}
+								else{
+									currentSampleNo = parseInt(data);
+
+									currentModNo = Math.floor(Math.random() * variation_count);
+									videoReversed = Math.floor(Math.random() * 2) == 1;
+
+									if(videoReversed) {
+										videoName = videoNames[currentSampleNo][currentModNo][1];
+										videoName2 = videoNames[currentSampleNo][currentModNo][0];
+									}
+									else{
+										videoName = videoNames[currentSampleNo][currentModNo][0];
+										videoName2 = videoNames[currentSampleNo][currentModNo][1];
+									}
+									
+									timeStart();
+								}
+							} else {
+								// done
+								console.log("done");
+							}
+						},
+						error: function (jqXHR, status, errorThrown)
+						{
+							serverProblemFromAny();	
+						}
+					});
+
+					// and determine how much labeled by this user
+					$.ajax({
+						url : "get_sample_count_by_this_pid.php",
+						type: "POST",
+						data : postData,
+						success: function(data,status, xhr)
+						{
+							if(data) {
+								if(data == "e") {
+									// done
+									console.log("e");
+								}
+								else {
+									$("#remaining-task").html('Completed Task Count: ' + parseInt(data) + ' / 4');
+								}
+							} else { // no more left, you completed the experiment!
+								// done
+								console.log("done");
+							}
+						},
+						error: function (jqXHR, status, errorThrown)
+						{
+							serverProblemFromAny();
+						}
+					});
+				}
+				else{
+					console.log(currentUrl);
+				}
+			}
+
+			function halilResetAfterSubmit() {
+				halilPlayer1.pauseVideo();
+				halilPlayer2.pauseVideo();
+				halilPlayer3.pauseVideo();
+				halilPlayer4.pauseVideo();
+				halilPlayer5.pauseVideo();
+				
+				document.getElementById('halil-tab-2').style.visibility = "hidden";
+				$('#halil-video-button-pause').attr("disabled", true);
+				$('#halil-video-button-next').attr("disabled", true);
+				$('#halil-video-button-submit').css("background-color", "");
+			}
+
+			function studySubmit() {
+				if(watched) {
+					var isOk = true;
+
+					for (let i = 0; i < buttonChoices.length; i++) {
+						if(buttonChoices[i] === -1) {
+							isOk = false;
+						}
+					}
+
+					if(isOk) {
+						var usermail = sessionStorage.getItem("usermail");
+									
+						var timeSeconds = timeEnd();
+						
+						if(timeSeconds >= 9999) timeSeconds = 9999;
+						if(timeSeconds < 0) timeSeconds = 9999;
+
+						var choices_string = "";
+
+						for (let i = 0; i < buttonChoices.length; i++) {
+							choices_string += buttonChoices[i] + ",";
+						}
+							
+						var dataString = "modNo:"+currentModNo + "#buttonChoices:" + choices_string + "#time:" + timeSeconds + "#isreverse:" + videoReversed;
+
+						var postData = 'PID='+currentEmail+'&ENO='+currentExperimentNo+'&SNO='+currentSampleNo+'&R='+dataString;
+							
+						$.ajax({
+							url : "prolific_add.php",
+							type: "POST",
+							data : postData,
+							success: function(data,status, xhr) {
+								alert("Submitted this sample.");
+								// scroll to top
+								document.getElementById('question-table').scrollTop = 0;
+								prepareForSample();
+								//findNextMeasureSampleTEDCompare();
+								//window.scrollTo({ top: 0, behavior: 'smooth' });
+							},
+							error: function (jqXHR, status, errorThrown) {
+								alert("Problem with server, please try again later.");
+							}
+						});
+					}
+					else {
+						alert("Please enter a choice for each question before submitting.");
+					}
+				}
+				else {
+					alert("You should first watch the video!");
+				}
+			}
+
+			// jQuery part
+			$(document).ready(function(){
+
+				prepareForSample();
+
+				if(handleRefresh()) {
+					document.getElementsByTagName("html")[0].style.visibility = "visible";
+				}
+
+				$('#begin-button').click(function(){
+					document.getElementById('welcome-div').style.display = "none";
+					document.getElementById('study-div').style.display = "block";
+				});
+
+				$('#submit-button').click(function(){
+					if(watched) {
+						studySubmit();
+					}
+					else{
+						alert("Please watch the video first!");
+					}
+				});
+
+				$('#load-sample').click(function(){
+					if (typeof YT !== 'undefined' && YT.loaded && (typeof player.loadVideoById === 'function') && (typeof player2.loadVideoById === 'function')) {
+						document.getElementById("video-player-div").removeAttribute("hidden");
+						document.getElementById("video-player-div-2").removeAttribute("hidden");
+						document.getElementById("video-table").removeAttribute("hidden");
+						document.getElementById("question-table").removeAttribute("hidden");
+						
+						document.getElementById("info-part-load").setAttribute("hidden", "hidden");
+
+						player.loadVideoById({'videoId': videoName});
+						player.loadPlaylist(videoName);
+						player.unMute();
+						//player.setLoop(true);
+						player.playVideo();
+
+						player2.loadVideoById({'videoId': videoName2});
+						player2.loadPlaylist(videoName2);
+						player2.unMute();
+						//player2.setLoop(true);
+						player2.playVideo();
+
+						document.getElementById('load-sample').style.borderColor = "rgb(50,200,50)";
+						document.getElementById('load-sample').style.backgroundColor = "rgb(50,200,50)";
+						
+						watched = true;
+
+						// document.getElementById("video-rate-info-ted").style.display = "none";
+
+						for (let i = 1; i <= 17; i++) {
+							$('#left-button-'+i).attr("disabled", false);
+							$('#equal-button-'+i).attr("disabled", false);
+							$('#right-button-'+i).attr("disabled", false);
+						}
+
+						$('#submit-button').attr("disabled", false);
+					}
+					else{
+						alert("Video player is not ready yet, please try again.");
+					}
+				});
+
+				for (let i = 1; i <= 17; i++) {
+					$('#left-button-'+i).click(function(){
+						resetCompareButton(i);
+						document.getElementById('left-button-'+i).style.borderColor = "rgb(50,200,50)";
+						document.getElementById('left-button-'+i).style.backgroundColor = "rgb(50,200,50)";
+						if(videoReversed === true) {
+							buttonChoices[i-1] = 2;
+						}
+						else{
+							buttonChoices[i-1] = 0;
+						}
+					});
+
+					$('#equal-button-'+i).click(function(){
+						resetCompareButton(i);
+						document.getElementById('equal-button-'+i).style.borderColor = "rgb(50,200,50)";
+						document.getElementById('equal-button-'+i).style.backgroundColor = "rgb(50,200,50)";
+						buttonChoices[i-1] = 1;
+					});
+
+					$('#right-button-'+i).click(function(){
+						resetCompareButton(i);
+						document.getElementById('right-button-'+i).style.borderColor = "rgb(50,200,50)";
+						document.getElementById('right-button-'+i).style.backgroundColor = "rgb(50,200,50)";
+						if(videoReversed === true) {
+							buttonChoices[i-1] = 0;
+						}
+						else{
+							buttonChoices[i-1] = 2;
+						}
+					});
+				}
+
+			
+				
+			});
+		</script>
+	</body>
+</html>
+
+
+
+
+--- deployment-scripts/logs.sh ---
+#!/bin/bash
+
+# Logs script for LMAIK User Study application
+
+# Configuration
+APP_NAME="lmaik-userstudy"
+SERVICE_NAME="lmaik-userstudy"
+LOG_DIR="/var/log/$APP_NAME"
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Logging function
+log() {
+    echo -e "${GREEN}[$(date +'%Y-%m-%d %H:%M:%S')] $1${NC}"
+}
+
+warn() {
+    echo -e "${YELLOW}[$(date +'%Y-%m-%d %H:%M:%S')] WARNING: $1${NC}"
+}
+
+error() {
+    echo -e "${RED}[$(date +'%Y-%m-%d %H:%M:%S')] ERROR: $1${NC}"
+}
+
+# Show usage
+show_usage() {
+    echo "Usage: $0 [OPTION]"
+    echo ""
+    echo "Options:"
+    echo "  -a, --app          Show application logs (Gunicorn)"
+    echo "  -n, --nginx        Show Nginx logs"
+    echo "  -s, --system       Show systemd service logs"
+    echo "  -e, --error        Show error logs only"
+    echo "  -f, --follow       Follow logs in real-time"
+    echo "  -l, --lines N      Show last N lines (default: 50)"
+    echo "  -c, --clear        Clear all logs"
+    echo "  -h, --help         Show this help message"
+    echo ""
+    echo "Examples:"
+    echo "  $0 -a -f           # Follow application logs"
+    echo "  $0 -n -l 100       # Show last 100 nginx log lines"
+    echo "  $0 -s -e           # Show systemd error logs"
+    echo "  $0 -c              # Clear all logs"
+}
+
+# Show application logs
+show_app_logs() {
+    local log_file="$LOG_DIR/error.log"
+    local access_file="$LOG_DIR/access.log"
+    
+    echo -e "${BLUE}=== Application Logs ===${NC}"
+    
+    if [ -f "$log_file" ]; then
+        echo -e "${GREEN}Error Log:${NC}"
+        if [ "$FOLLOW" = true ]; then
+            sudo tail -f "$log_file"
+        else
+            sudo tail -n "$LINES" "$log_file"
+        fi
+    else
+        echo "No error log file found"
+    fi
+    
+    if [ -f "$access_file" ]; then
+        echo -e "${GREEN}Access Log:${NC}"
+        if [ "$FOLLOW" = true ]; then
+            sudo tail -f "$access_file"
+        else
+            sudo tail -n "$LINES" "$access_file"
+        fi
+    else
+        echo "No access log file found"
+    fi
+}
+
+# Show Nginx logs
+show_nginx_logs() {
+    echo -e "${BLUE}=== Nginx Logs ===${NC}"
+    
+    local error_log="/var/log/nginx/error.log"
+    local access_log="/var/log/nginx/access.log"
+    
+    if [ -f "$error_log" ]; then
+        echo -e "${GREEN}Nginx Error Log:${NC}"
+        if [ "$FOLLOW" = true ]; then
+            sudo tail -f "$error_log"
+        else
+            sudo tail -n "$LINES" "$error_log"
+        fi
+    else
+        echo "No Nginx error log found"
+    fi
+    
+    if [ -f "$access_log" ]; then
+        echo -e "${GREEN}Nginx Access Log:${NC}"
+        if [ "$FOLLOW" = true ]; then
+            sudo tail -f "$access_log"
+        else
+            sudo tail -n "$LINES" "$access_log"
+        fi
+    else
+        echo "No Nginx access log found"
+    fi
+}
+
+# Show systemd service logs
+show_system_logs() {
+    echo -e "${BLUE}=== Systemd Service Logs ===${NC}"
+    
+    if [ "$FOLLOW" = true ]; then
+        sudo journalctl -u $SERVICE_NAME -f
+    else
+        if [ "$ERROR_ONLY" = true ]; then
+            sudo journalctl -u $SERVICE_NAME --no-pager -l | grep -i error | tail -n "$LINES"
+        else
+            sudo journalctl -u $SERVICE_NAME --no-pager -l | tail -n "$LINES"
+        fi
+    fi
+}
+
+# Clear logs
+clear_logs() {
+    echo -e "${BLUE}=== Clearing Logs ===${NC}"
+    
+    # Clear application logs
+    if [ -d "$LOG_DIR" ]; then
+        sudo rm -f "$LOG_DIR"/*.log
+        log "Application logs cleared"
+    fi
+    
+    # Clear Nginx logs
+    sudo truncate -s 0 /var/log/nginx/error.log 2>/dev/null || true
+    sudo truncate -s 0 /var/log/nginx/access.log 2>/dev/null || true
+    log "Nginx logs cleared"
+    
+    # Clear systemd logs for the service
+    sudo journalctl --vacuum-time=1s -u $SERVICE_NAME >/dev/null 2>&1 || true
+    log "Systemd logs cleared"
+    
+    echo -e "${GREEN}All logs cleared successfully${NC}"
+}
+
+# Show log file sizes
+show_log_sizes() {
+    echo -e "${BLUE}=== Log File Sizes ===${NC}"
+    
+    # Application logs
+    if [ -d "$LOG_DIR" ]; then
+        echo "Application logs:"
+        for log_file in "$LOG_DIR"/*.log; do
+            if [ -f "$log_file" ]; then
+                local size=$(du -h "$log_file" | cut -f1)
+                local name=$(basename "$log_file")
+                echo "  $name: $size"
+            fi
+        done
+    fi
+    
+    # Nginx logs
+    echo "Nginx logs:"
+    for log_file in /var/log/nginx/*.log; do
+        if [ -f "$log_file" ]; then
+            local size=$(du -h "$log_file" | cut -f1)
+            local name=$(basename "$log_file")
+            echo "  $name: $size"
+        fi
+    done
+    
+    # Systemd logs
+    echo "Systemd logs:"
+    local journal_size=$(sudo journalctl --disk-usage -u $SERVICE_NAME 2>/dev/null | grep -o '[0-9.]*[KMG]' || echo "Unknown")
+    echo "  $SERVICE_NAME: $journal_size"
+}
+
+# Main function
+main() {
+    # Default values
+    LINES=50
+    FOLLOW=false
+    ERROR_ONLY=false
+    SHOW_APP=false
+    SHOW_NGINX=false
+    SHOW_SYSTEM=false
+    CLEAR_LOGS=false
+    
+    # Parse command line arguments
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -a|--app)
+                SHOW_APP=true
+                shift
+                ;;
+            -n|--nginx)
+                SHOW_NGINX=true
+                shift
+                ;;
+            -s|--system)
+                SHOW_SYSTEM=true
+                shift
+                ;;
+            -e|--error)
+                ERROR_ONLY=true
+                shift
+                ;;
+            -f|--follow)
+                FOLLOW=true
+                shift
+                ;;
+            -l|--lines)
+                LINES="$2"
+                shift 2
+                ;;
+            -c|--clear)
+                CLEAR_LOGS=true
+                shift
+                ;;
+            -h|--help)
+                show_usage
+                exit 0
+                ;;
+            *)
+                echo "Unknown option: $1"
+                show_usage
+                exit 1
+                ;;
+        esac
+    done
+    
+    # If no specific log type is specified, show all
+    if [ "$SHOW_APP" = false ] && [ "$SHOW_NGINX" = false ] && [ "$SHOW_SYSTEM" = false ] && [ "$CLEAR_LOGS" = false ]; then
+        SHOW_APP=true
+        SHOW_NGINX=true
+        SHOW_SYSTEM=true
+    fi
+    
+    # Clear logs if requested
+    if [ "$CLEAR_LOGS" = true ]; then
+        clear_logs
+        exit 0
+    fi
+    
+    # Show log sizes
+    show_log_sizes
+    echo ""
+    
+    # Show requested logs
+    if [ "$SHOW_APP" = true ]; then
+        show_app_logs
+        echo ""
+    fi
+    
+    if [ "$SHOW_NGINX" = true ]; then
+        show_nginx_logs
+        echo ""
+    fi
+    
+    if [ "$SHOW_SYSTEM" = true ]; then
+        show_system_logs
+        echo ""
+    fi
+    
+    # Show quick commands
+    echo -e "${BLUE}=== Quick Commands ===${NC}"
+    echo -e "Follow all logs: $0 -a -n -s -f"
+    echo -e "Show errors only: $0 -e"
+    echo -e "Show last 100 lines: $0 -l 100"
+    echo -e "Clear all logs: $0 -c"
+}
+
+# Run main function
+main "$@" 
+
+--- deployment-scripts/status.sh ---
+#!/bin/bash
+
+# Status script for LMAIK User Study application
+
+# Configuration
+APP_NAME="lmaik-userstudy"
+SERVICE_NAME="lmaik-userstudy"
+APP_URL="http://localhost"
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Logging function
+log() {
+    echo -e "${GREEN}[$(date +'%Y-%m-%d %H:%M:%S')] $1${NC}"
+}
+
+warn() {
+    echo -e "${YELLOW}[$(date +'%Y-%m-%d %H:%M:%S')] WARNING: $1${NC}"
+}
+
+error() {
+    echo -e "${RED}[$(date +'%Y-%m-%d %H:%M:%S')] ERROR: $1${NC}"
+}
+
+# Check service status
+check_service_status() {
+    local service=$1
+    local service_name=$2
+    
+    echo -e "${BLUE}=== $service_name Status ===${NC}"
+    if systemctl is-active --quiet $service; then
+        echo -e "${GREEN}✓ $service_name is running${NC}"
+        systemctl status $service --no-pager -l | head -10
+    else
+        echo -e "${RED}✗ $service_name is not running${NC}"
+        systemctl status $service --no-pager -l | head -10
+    fi
+    echo ""
+}
+
+# Check application response
+check_application_response() {
+    echo -e "${BLUE}=== Application Response ===${NC}"
+    if curl -f -s $APP_URL > /dev/null; then
+        echo -e "${GREEN}✓ Application is responding at $APP_URL${NC}"
+        
+        # Get response time
+        local response_time=$(curl -w "%{time_total}" -s -o /dev/null $APP_URL)
+        echo -e "Response time: ${response_time}s"
+        
+        # Get HTTP status
+        local http_status=$(curl -s -o /dev/null -w "%{http_code}" $APP_URL)
+        echo -e "HTTP status: $http_status"
+    else
+        echo -e "${RED}✗ Application is not responding at $APP_URL${NC}"
+    fi
+    echo ""
+}
+
+# Check system resources
+check_system_resources() {
+    echo -e "${BLUE}=== System Resources ===${NC}"
+    
+    # CPU usage
+    local cpu_usage=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | cut -d'%' -f1)
+    echo -e "CPU usage: ${cpu_usage}%"
+    
+    # Memory usage
+    local memory_info=$(free -h | grep Mem)
+    local total_mem=$(echo $memory_info | awk '{print $2}')
+    local used_mem=$(echo $memory_info | awk '{print $3}')
+    local free_mem=$(echo $memory_info | awk '{print $4}')
+    echo -e "Memory: ${used_mem}/${total_mem} (${free_mem} free)"
+    
+    # Disk usage
+    local disk_usage=$(df -h / | tail -1 | awk '{print $5}')
+    local disk_available=$(df -h / | tail -1 | awk '{print $4}')
+    echo -e "Disk usage: ${disk_usage} (${disk_available} available)"
+    
+    # Load average
+    local load_avg=$(uptime | awk -F'load average:' '{print $2}' | awk '{print $1}' | sed 's/,//')
+    echo -e "Load average: ${load_avg}"
+    echo ""
+}
+
+# Check network connectivity
+check_network() {
+    echo -e "${BLUE}=== Network Information ===${NC}"
+    
+    # Get public IP
+    local public_ip=$(curl -s ifconfig.me 2>/dev/null || echo "Unable to get public IP")
+    echo -e "Public IP: $public_ip"
+    
+    # Get local IP
+    local local_ip=$(hostname -I | awk '{print $1}')
+    echo -e "Local IP: $local_ip"
+    
+    # Check port 80
+    if netstat -tlnp 2>/dev/null | grep :80 > /dev/null; then
+        echo -e "${GREEN}✓ Port 80 is listening${NC}"
+    else
+        echo -e "${RED}✗ Port 80 is not listening${NC}"
+    fi
+    
+    # Check port 8000 (Gunicorn)
+    if netstat -tlnp 2>/dev/null | grep :8000 > /dev/null; then
+        echo -e "${GREEN}✓ Port 8000 (Gunicorn) is listening${NC}"
+    else
+        echo -e "${RED}✗ Port 8000 (Gunicorn) is not listening${NC}"
+    fi
+    echo ""
+}
+
+# Check recent logs
+check_recent_logs() {
+    echo -e "${BLUE}=== Recent Application Logs ===${NC}"
+    local log_file="/var/log/$APP_NAME/error.log"
+    
+    if [ -f "$log_file" ]; then
+        echo -e "Last 10 error log entries:"
+        sudo tail -10 "$log_file" 2>/dev/null || echo "Unable to read log file"
+    else
+        echo "No error log file found"
+    fi
+    echo ""
+}
+
+# Check process information
+check_processes() {
+    echo -e "${BLUE}=== Process Information ===${NC}"
+    
+    # Gunicorn processes
+    local gunicorn_count=$(pgrep -c gunicorn 2>/dev/null || echo "0")
+    echo -e "Gunicorn processes: $gunicorn_count"
+    
+    # Nginx processes
+    local nginx_count=$(pgrep -c nginx 2>/dev/null || echo "0")
+    echo -e "Nginx processes: $nginx_count"
+    
+    # Python processes
+    local python_count=$(pgrep -c python 2>/dev/null || echo "0")
+    echo -e "Python processes: $python_count"
+    echo ""
+}
+
+# Main status function
+main() {
+    echo "=== Status Report for $APP_NAME ==="
+    echo "Time: $(date)"
+    echo ""
+    
+    # Check all services
+    check_service_status $SERVICE_NAME "Application Service"
+    check_service_status nginx "Nginx"
+    
+    # Check application response
+    check_application_response
+    
+    # Check system resources
+    check_system_resources
+    
+    # Check network
+    check_network
+    
+    # Check processes
+    check_processes
+    
+    # Check recent logs
+    check_recent_logs
+    
+    echo -e "${BLUE}=== Quick Commands ===${NC}"
+    echo -e "View live logs: sudo journalctl -u $SERVICE_NAME -f"
+    echo -e "Restart application: sudo systemctl restart $SERVICE_NAME"
+    echo -e "Restart nginx: sudo systemctl restart nginx"
+    echo -e "Check all services: sudo systemctl status $SERVICE_NAME nginx"
+    echo ""
+    
+    # Overall status
+    if systemctl is-active --quiet $SERVICE_NAME && systemctl is-active --quiet nginx && curl -f -s $APP_URL > /dev/null; then
+        echo -e "${GREEN}✓ All systems operational${NC}"
+        exit 0
+    else
+        echo -e "${RED}✗ Some systems are not operational${NC}"
+        exit 1
+    fi
+}
+
+# Run main function
+main "$@" 
+
+--- deployment-scripts/restart.sh ---
+#!/bin/bash
+
+# Restart script for LMAIK User Study application
+
+# Configuration
+APP_NAME="lmaik-userstudy"
+SERVICE_NAME="lmaik-userstudy"
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Logging function
+log() {
+    echo -e "${GREEN}[$(date +'%Y-%m-%d %H:%M:%S')] $1${NC}"
+}
+
+warn() {
+    echo -e "${YELLOW}[$(date +'%Y-%m-%d %H:%M:%S')] WARNING: $1${NC}"
+}
+
+error() {
+    echo -e "${RED}[$(date +'%Y-%m-%d %H:%M:%S')] ERROR: $1${NC}"
+}
+
+# Check if running as root or with sudo
+check_permissions() {
+    if [[ $EUID -ne 0 ]]; then
+        error "This script requires sudo privileges"
+        echo "Please run: sudo $0"
+        exit 1
+    fi
+}
+
+# Restart application service
+restart_application() {
+    log "Restarting $SERVICE_NAME service..."
+    if systemctl restart $SERVICE_NAME; then
+        log "Service $SERVICE_NAME restarted successfully"
+        return 0
+    else
+        error "Failed to restart $SERVICE_NAME service"
+        return 1
+    fi
+}
+
+# Restart nginx
+restart_nginx() {
+    log "Restarting nginx service..."
+    if systemctl restart nginx; then
+        log "Nginx restarted successfully"
+        return 0
+    else
+        error "Failed to restart nginx"
+        return 1
+    fi
+}
+
+# Check service status
+check_status() {
+    log "Checking service status..."
+    echo ""
+    systemctl status $SERVICE_NAME --no-pager -l
+    echo ""
+    systemctl status nginx --no-pager -l
+}
+
+# Wait for application to be ready
+wait_for_ready() {
+    log "Waiting for application to be ready..."
+    local max_attempts=30
+    local attempt=1
+    
+    while [ $attempt -le $max_attempts ]; do
+        if curl -f -s http://localhost > /dev/null; then
+            log "Application is ready!"
+            return 0
+        else
+            echo -n "."
+            sleep 2
+            ((attempt++))
+        fi
+    done
+    
+    warn "Application may not be fully ready yet"
+    return 1
+}
+
+# Main restart function
+main() {
+    echo "=== Restarting $APP_NAME ==="
+    echo "Time: $(date)"
+    echo ""
+    
+    # Check permissions
+    check_permissions
+    
+    # Restart services
+    if restart_application && restart_nginx; then
+        log "All services restarted successfully"
+    else
+        error "Some services failed to restart"
+        exit 1
+    fi
+    
+    # Wait for application to be ready
+    wait_for_ready
+    
+    # Show status
+    check_status
+    
+    echo ""
+    log "Restart completed successfully!"
+    echo -e "${BLUE}Application should be available at: http://$(curl -s ifconfig.me)${NC}"
+}
+
+# Run main function
+main "$@" 
+
+--- deployment-scripts/deploy.sh ---
+#!/bin/bash
+
+# LMAIK User Study - EC2 Deployment Script
+# Complete setup for Flask application with Nginx
+
+set -e  # Exit on any error
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Logging function
+log() {
+    echo -e "${GREEN}[$(date +'%Y-%m-%d %H:%M:%S')] $1${NC}"
+}
+
+warn() {
+    echo -e "${YELLOW}[$(date +'%Y-%m-%d %H:%M:%S')] WARNING: $1${NC}"
+}
+
+error() {
+    echo -e "${RED}[$(date +'%Y-%m-%d %H:%M:%S')] ERROR: $1${NC}"
+    exit 1
+}
+
+# Configuration
+APP_NAME="lmaik-userstudy"
+APP_USER="lmaik"
+APP_DIR="/opt/$APP_NAME"
+VENV_DIR="/opt/$APP_NAME/venv"
+SERVICE_NAME="lmaik-userstudy"
+NGINX_SITE="lmaik-userstudy"
+
+log "Starting deployment of $APP_NAME..."
+
+# Check if running as root
+if [[ $EUID -eq 0 ]]; then
+   error "This script should not be run as root. Please run as a regular user with sudo privileges."
+fi
+
+# Update system packages
+log "Updating system packages..."
+sudo apt-get update -y
+
+# Install essential system dependencies
+log "Installing system dependencies..."
+sudo apt-get install -y \
+    python3 \
+    python3-pip \
+    python3-venv \
+    python3-dev \
+    build-essential \
+    nginx \
+    git \
+    curl \
+    wget \
+    unzip \
+    libffi-dev \
+    libssl-dev \
+    libblas-dev \
+    liblapack-dev \
+    gfortran \
+    libhdf5-dev \
+    libnetcdf-dev \
+    libgeos-dev \
+    libproj-dev \
+    proj-data \
+    proj-bin \
+    libgdal-dev \
+    gdal-bin
+
+# Create application user
+log "Creating application user..."
+if ! id "$APP_USER" &>/dev/null; then
+    sudo useradd -r -s /bin/bash -d $APP_DIR $APP_USER
+    log "Created user: $APP_USER"
+else
+    log "User $APP_USER already exists"
+fi
+
+# Create application directory
+log "Creating application directory..."
+sudo mkdir -p $APP_DIR
+sudo chown $APP_USER:$APP_USER $APP_DIR
+
+# Copy application files
+log "Copying application files..."
+if [ -f "app.py" ] && [ -f "requirements.txt" ]; then
+    sudo cp -r . $APP_DIR/
+    sudo chown -R $APP_USER:$APP_USER $APP_DIR
+    log "Application files copied successfully"
+else
+    error "Please run this script from the application directory (must contain app.py and requirements.txt)"
+fi
+
+# Create virtual environment
+log "Creating Python virtual environment..."
+sudo -u $APP_USER python3 -m venv $VENV_DIR
+
+# Install Python dependencies
+log "Installing Python dependencies..."
+sudo -u $APP_USER $VENV_DIR/bin/pip install --upgrade pip setuptools wheel
+sudo -u $APP_USER $VENV_DIR/bin/pip install -r $APP_DIR/requirements.txt
+
+# Create uploads directory
+log "Creating uploads directory..."
+sudo -u $APP_USER mkdir -p $APP_DIR/uploads
+sudo chmod 755 $APP_DIR/uploads
+
+# Create log directory
+log "Creating log directory..."
+sudo mkdir -p /var/log/$APP_NAME
+sudo chown $APP_USER:$APP_USER /var/log/$APP_NAME
+
+# Create Flask startup script
+log "Creating Flask startup script..."
+sudo tee $APP_DIR/start_flask.py > /dev/null <<EOF
+#!/usr/bin/env python3
+"""
+Flask startup script for production
+"""
+import os
+import sys
+
+# Add the application directory to Python path
+sys.path.insert(0, '/opt/lmaik-userstudy')
+
+# Set environment variables
+os.environ['FLASK_ENV'] = 'production'
+os.environ['FLASK_DEBUG'] = '0'
+
+# Import and run the Flask app
+from app import app
+
+if __name__ == '__main__':
+    app.run(host='127.0.0.1', port=8000, debug=False, threaded=True)
+EOF
+
+# Make the startup script executable
+sudo chmod +x $APP_DIR/start_flask.py
+
+# Create systemd service file
+log "Creating systemd service..."
+sudo tee /etc/systemd/system/$SERVICE_NAME.service > /dev/null <<EOF
+[Unit]
+Description=LMAIK User Study Flask Application
+After=network.target
+
+[Service]
+Type=simple
+User=lmaik
+Group=lmaik
+WorkingDirectory=/opt/lmaik-userstudy
+Environment=PATH=/opt/lmaik-userstudy/venv/bin
+Environment=FLASK_ENV=production
+Environment=FLASK_DEBUG=0
+ExecStart=/opt/lmaik-userstudy/venv/bin/python start_flask.py
+ExecReload=/bin/kill -s HUP \$MAINPID
+Restart=always
+RestartSec=3
+StandardOutput=append:/var/log/lmaik-userstudy/access.log
+StandardError=append:/var/log/lmaik-userstudy/error.log
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Create Nginx configuration
+log "Creating Nginx configuration..."
+sudo tee /etc/nginx/sites-available/$NGINX_SITE > /dev/null <<EOF
+server {
+    listen 80;
+    server_name _;
+
+    # Allow very large uploads (0 disables size checking in Nginx)
+    client_max_body_size 0;
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_connect_timeout 300s;
+        proxy_send_timeout 300s;
+        proxy_read_timeout 300s;
+    }
+
+    location /static/ {
+        alias /opt/lmaik-userstudy/static/;
+        expires 30d;
+        add_header Cache-Control "public, immutable";
+    }
+
+    location /uploads/ {
+        alias /opt/lmaik-userstudy/uploads/;
+        internal;
+    }
+}
+EOF
+
+# Enable Nginx site
+log "Enabling Nginx site..."
+sudo ln -sf /etc/nginx/sites-available/$NGINX_SITE /etc/nginx/sites-enabled/
+sudo rm -f /etc/nginx/sites-enabled/default
+
+# Test Nginx configuration
+log "Testing Nginx configuration..."
+sudo nginx -t
+
+# Enable and start services
+log "Enabling and starting services..."
+sudo systemctl daemon-reload
+sudo systemctl enable $SERVICE_NAME
+sudo systemctl start $SERVICE_NAME
+sudo systemctl enable nginx
+sudo systemctl restart nginx
+
+# Configure firewall
+log "Configuring firewall..."
+sudo ufw allow 'Nginx Full'
+sudo ufw allow ssh
+sudo ufw --force enable
+
+# Copy management scripts to application directory
+log "Installing management scripts..."
+sudo cp deployment-scripts/restart.sh $APP_DIR/
+sudo cp deployment-scripts/status.sh $APP_DIR/
+sudo cp deployment-scripts/logs.sh $APP_DIR/
+
+# Make scripts executable
+sudo chmod +x $APP_DIR/*.sh
+sudo chown lmaik:lmaik $APP_DIR/*.sh
+
+# Test the application
+log "Testing application..."
+sleep 5
+if curl -f -s http://localhost > /dev/null; then
+    log "Application is running successfully!"
+else
+    warn "Application might not be fully started yet. Please check logs:"
+    warn "sudo journalctl -u $SERVICE_NAME -f"
+fi
+
+# Display final information
+log "Deployment completed successfully!"
+echo ""
+echo -e "${BLUE}=== Deployment Summary ===${NC}"
+echo -e "Application: $APP_NAME"
+echo -e "Installation directory: $APP_DIR"
+echo -e "Virtual environment: $VENV_DIR"
+echo -e "Service name: $SERVICE_NAME"
+echo -e "Nginx site: $NGINX_SITE"
+echo ""
+echo -e "${BLUE}=== Management Commands ===${NC}"
+echo -e "Check service status: $APP_DIR/status.sh"
+echo -e "View application logs: $APP_DIR/logs.sh"
+echo -e "Restart application: $APP_DIR/restart.sh"
+echo ""
+echo -e "${BLUE}=== Access Information ===${NC}"
+echo -e "Local access: http://localhost"
+echo -e "Public access: http://$(curl -s ifconfig.me)"
+echo ""
+echo -e "${GREEN}The application is now running and will start automatically on boot!${NC}"
+echo -e "${GREEN}All services are configured for auto-restart on failure.${NC}" 
+
+--- deployment-scripts/README.md ---
+# Riskoloji Analiz - Deployment Scripts
+
+This directory contains deployment and management scripts for the Riskoloji Analiz Flask application.
+
+## Scripts Overview
+
+### 1. `deploy.sh` - Main Deployment Script
+**Purpose**: Complete setup of the application on a fresh EC2 instance.
+
+**Usage**:
+```bash
+# Run from the application directory
+sudo ./deployment-scripts/deploy.sh
+```
+
+**What it does**:
+- Installs system dependencies (Python, Nginx, scientific libraries)
+- Creates application user and directories
+- Sets up Python virtual environment
+- Installs Python dependencies from `requirements.txt`
+- Configures Flask application to run directly
+- Sets up Nginx reverse proxy
+- Creates systemd service for auto-start
+- Configures firewall
+- Installs management scripts
+- Tests the deployment
+
+### 2. `status.sh` - Status Report
+**Purpose**: Detailed status report of all services and system resources.
+
+**Usage**:
+```bash
+# Run status check
+sudo /opt/riskoloji-analiz/status.sh
+
+# Or from deployment directory
+sudo ./deployment-scripts/status.sh
+```
+
+**What it shows**:
+- Service status (Application, Nginx)
+- Application response time and HTTP status
+- System resources (CPU, Memory, Disk, Load)
+- Network information (IP addresses, ports)
+- Process counts
+- Recent logs
+- Quick management commands
+
+### 3. `restart.sh` - Service Restart
+**Purpose**: Restart application and related services.
+
+**Usage**:
+```bash
+# Restart services
+sudo /opt/riskoloji-analiz/restart.sh
+
+# Or from deployment directory
+sudo ./deployment-scripts/restart.sh
+```
+
+**What it does**:
+- Restarts application service
+- Restarts Nginx
+- Waits for services to be ready
+- Shows service status
+- Displays access information
+
+### 4. `logs.sh` - Log Management
+**Purpose**: View and manage application logs.
+
+**Usage**:
+```bash
+# View logs
+sudo /opt/riskoloji-analiz/logs.sh
+
+# Or from deployment directory
+sudo ./deployment-scripts/logs.sh
+```
+
+**What it shows**:
+- Application logs (access and error)
+- Nginx logs
+- Systemd service logs
+- Real-time log monitoring
+- Log rotation information
+
+## Architecture
+
+The application uses a simple but robust architecture:
+
+```
+Internet → Nginx (Port 80) → Flask App (Port 8000)
+```
+
+### Components:
+- **Nginx**: Reverse proxy and static file server
+- **Flask**: Python web application running directly
+- **Systemd**: Service management and auto-restart
+- **Python Virtual Environment**: Isolated dependencies
+
+### Key Features:
+- **Direct Flask Execution**: No WSGI server needed, Flask runs directly
+- **Auto-restart**: Services automatically restart on failure
+- **Log Management**: Comprehensive logging to files
+- **Static File Serving**: Nginx serves static files efficiently
+- **Process Management**: Systemd manages the Flask process
+
+## Deployment Process
+
+### Prerequisites
+- Ubuntu/Debian system
+- Sudo privileges
+- Internet connection for package installation
+
+### Quick Deployment
+1. Clone or copy the application to the server
+2. Navigate to the application directory
+3. Run the deployment script:
+   ```bash
+   sudo ./deployment-scripts/deploy.sh
+   ```
+
+### What Gets Installed
+- **System Packages**: Python 3, Nginx, scientific libraries
+- **Python Dependencies**: All packages from `requirements.txt`
+- **Application**: Copied to `/opt/riskoloji-analiz/`
+- **User**: `riskoloji` user created for security
+- **Services**: Systemd services for auto-start
+- **Firewall**: UFW configured for web access
+
+## Management Commands
+
+### 1. Status Monitoring
+```bash
+# Check overall status
+sudo /opt/riskoloji-analiz/status.sh
+
+# View logs
+sudo /opt/riskoloji-analiz/logs.sh
+```
+
+### 2. Service Management
+```bash
+# Restart application
+sudo /opt/riskoloji-analiz/restart.sh
+
+# Manual service control
+sudo systemctl restart riskoloji-analiz
+sudo systemctl restart nginx
+```
+
+### 3. Manual Updates
+To update the application manually:
+
+1. **Backup current version**:
+   ```bash
+   sudo cp -r /opt/riskoloji-analiz /opt/riskoloji-analiz.backup.$(date +%Y%m%d)
+   ```
+
+2. **Copy new files**:
+   ```bash
+   sudo cp -r /path/to/new/version/* /opt/riskoloji-analiz/
+   sudo chown -R riskoloji:riskoloji /opt/riskoloji-analiz/
+   ```
+
+3. **Update dependencies** (if requirements.txt changed):
+   ```bash
+   sudo -u riskoloji /opt/riskoloji-analiz/venv/bin/pip install -r /opt/riskoloji-analiz/requirements.txt
+   ```
+
+4. **Restart services**:
+   ```bash
+   sudo /opt/riskoloji-analiz/restart.sh
+   ```
+
+## Troubleshooting
+
+### Common Issues
+
+#### 1. Application Not Starting
+```bash
+# Check service status
+sudo systemctl status riskoloji-analiz
+
+# View logs
+sudo journalctl -u riskoloji-analiz -f
+```
+
+#### 2. Nginx Issues
+```bash
+# Test Nginx configuration
+sudo nginx -t
+
+# Check Nginx status
+sudo systemctl status nginx
+```
+
+#### 3. Permission Issues
+```bash
+# Fix ownership
+sudo chown -R riskoloji:riskoloji /opt/riskoloji-analiz/
+
+# Fix permissions
+sudo chmod 755 /opt/riskoloji-analiz/uploads/
+```
+
+#### 4. Port Conflicts
+```bash
+# Check what's using port 8000
+sudo netstat -tlnp | grep :8000
+
+# Check what's using port 80
+sudo netstat -tlnp | grep :80
+```
+
+### Log Locations
+- **Application Logs**: `/var/log/riskoloji-analiz/`
+- **Nginx Logs**: `/var/log/nginx/`
+- **Systemd Logs**: `sudo journalctl -u riskoloji-analiz`
+
+## Security Considerations
+
+### Firewall
+- Only ports 80 (HTTP) and 22 (SSH) are open
+- Nginx handles all external connections
+- Flask app only listens on localhost (127.0.0.1)
+
+### User Permissions
+- Application runs as dedicated `riskoloji` user
+- Minimal file permissions
+- No root access for application
+
+### File Uploads
+- Maximum file size: 16MB
+- Uploads stored in isolated directory
+- Files served through Nginx with internal directive
+
+## Performance Optimization
+
+### Flask Configuration
+- Debug mode disabled in production
+- Threaded mode enabled for concurrent requests
+- Proper logging configuration
+
+### Nginx Configuration
+- Static file caching (30 days)
+- Gzip compression
+- Proxy buffering for large requests
+- Connection timeouts configured
+
+### System Resources
+- Monitor with `status.sh` script
+- Check disk space regularly
+- Monitor memory usage
+
+## Backup and Recovery
+
+### Application Backup
+```bash
+# Create backup
+sudo cp -r /opt/riskoloji-analiz /opt/riskoloji-analiz.backup.$(date +%Y%m%d)
+
+# Restore from backup
+sudo systemctl stop riskoloji-analiz
+sudo rm -rf /opt/riskoloji-analiz
+sudo cp -r /opt/riskoloji-analiz.backup.YYYYMMDD /opt/riskoloji-analiz
+sudo chown -R riskoloji:riskoloji /opt/riskoloji-analiz
+sudo systemctl start riskoloji-analiz
+```
+
+### Data Backup
+- Upload directory: `/opt/riskoloji-analiz/uploads/`
+- Logs: `/var/log/riskoloji-analiz/`
+- Configuration: `/etc/systemd/system/riskoloji-analiz.service`
+
+## Support
+
+For issues or questions:
+1. Check the logs first: `sudo /opt/riskoloji-analiz/logs.sh`
+2. Verify service status: `sudo /opt/riskoloji-analiz/status.sh`
+3. Review this documentation
+4. Check system resources and permissions 
+
+--- static/css/style.css ---
+/* /static/css/style.css */
+
+body {
+    font-family: sans-serif;
+    line-height: 1.6;
+    color: #333;
+    background-color: #f4f4f4;
+    margin: 0;
+}
+
+.container {
+    max-width: 1200px;
+    margin: auto;
+    background: #fff;
+    padding: 20px;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+}
+
+header {
+    text-align: center;
+    border-bottom: 1px solid #ddd;
+    margin-bottom: 0px;
+}
+
+.viewer-container {
+    display: flex;
+    justify-content: space-around;
+    gap: 20px;
+    margin-bottom: 15px; /* Reduced margin */
+}
+
+.viewer {
+    flex: 1;
+    text-align: center;
+}
+
+.viewer-canvas {
+    width: 100%;
+    height: 40vh; /* Adjusted height to be relative to viewport */
+    border: 1px solid #ccc;
+    background-color: #e9e9e9;
+}
+
+form {
+    margin-top: 0;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    padding: 20px;
+    height: 45vh; /* Give form a fixed height */
+    overflow-y: auto; /* Make it scrollable */
+}
+
+.question {
+    background-color: #f9f9f9;
+    border: 1px solid #eee;
+    padding: 15px;
+    margin-bottom: 15px;
+    border-radius: 5px;
+}
+
+.question label {
+    font-weight: bold;
+    display: block;
+    margin-bottom: 10px;
+}
+
+.comparison-buttons {
+    padding: 10px 0;
+}
+
+.comparison-buttons label {
+    display: inline-block;
+    padding: 8px 16px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    cursor: pointer;
+    margin: 0 5px;
+    user-select: none; /* Prevents text selection */
+}
+
+/* Hide the actual radio button */
+.comparison-buttons input[type="radio"] {
+    display: none;
+}
+
+/* Style for the selected button */
+.comparison-buttons input[type="radio"]:checked + label {
+    background-color: #007bff;
+    color: white;
+    border-color: #007bff;
+}
+
+/* Hover effect for unselected buttons */
+.comparison-buttons input[type="radio"]:not(:checked) + label:hover {
+    background-color: #f0f0f0;
+}
+
+button {
+    display: block;
+    width: 100%;
+    padding: 15px;
+    background-color: #007bff;
+    color: white;
+    border: none;
+    font-size: 1.2em;
+    cursor: pointer;
+    border-radius: 5px;
+    margin-top: 20px;
+}
+
+button:hover {
+    background-color: #0056b3;
+}
+
+footer {
+    text-align: center;
+    margin-top: 30px;
+    padding-top: 20px;
+    border-top: 1px solid #ddd;
+    font-size: 0.8em;
+    color: #777;
+}
+
+.error {
+    color: red;
+    font-weight: bold;
+}
+
+/* Styles for Results Page */
+.table-container {
+    width: 100%;
+    overflow-x: auto;
+    margin-top: 20px;
+    max-height: 70vh; /* Limit height and make table scrollable */
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+th, td {
+    border: 1px solid #ddd;
+    padding: 12px;
+    text-align: left;
+    white-space: nowrap; /* Prevent line breaks in cells */
+}
+
+th {
+    background-color: #f2f2f2;
+    position: sticky;
+    top: 0; /* Make header sticky */
+}
+
+.download-btn {
+    display: inline-block;
+    padding: 10px 15px;
+    background-color: #28a745;
+    color: white !important;
+    text-decoration: none;
+    border-radius: 5px;
+    margin-bottom: 20px;
+}
+
+.download-btn:hover {
+    background-color: #218838;
+}
+
+--- static/js/visualization.js ---
+// /static/js/visualization.js
+
+import * as THREE from 'three';
+import { OrbitControls } from 'OrbitControls';
+import { BVHLoader } from 'BVHLoader';
+
+'use strict';
+
+const scenes = [];
+let animationMixers = [];
+const clock = new THREE.Clock();
+
+function setupViewer(container) {
+    const bvhFile = container.dataset.bvhFile;
+    if (!bvhFile) {
+        console.error("No BVH file specified for viewer:", container.id);
+        return;
+    }
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0xeeeeee);
+
+    const camera = new THREE.PerspectiveCamera(60, container.clientWidth / container.clientHeight, 1, 2000);
+    camera.position.set(0, 150, 400);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(container.clientWidth, container.clientHeight);
+    container.appendChild(renderer.domElement);
+    
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+    scene.add(ambientLight);
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
+    directionalLight.position.set(0, 1, 0.5).normalize();
+    scene.add(directionalLight);
+    
+    const gridHelper = new THREE.GridHelper(800, 20);
+    scene.add(gridHelper);
+
+    const loader = new BVHLoader();
+    loader.load(bvhFile, function (result) {
+        const skeletonHelper = new THREE.SkeletonHelper(result.skeleton.bones[0]);
+        skeletonHelper.skeleton = result.skeleton;
+        scene.add(skeletonHelper);
+
+        // Attempt to make lines thicker. Note: linewidth is not universally supported
+        // and may require specific WebGL renderer settings or extensions.
+        if (skeletonHelper.material) {
+            skeletonHelper.material.linewidth = 3; // Adjust as needed
+        }
+
+        const boneContainer = new THREE.Group();
+        boneContainer.add(result.skeleton.bones[0]);
+        scene.add(boneContainer);
+
+        // --- Auto-scaling ---
+        const box = new THREE.Box3();
+        result.skeleton.bones[0].updateWorldMatrix(true, true);
+        for (const bone of result.skeleton.bones) {
+            const bonePos = new THREE.Vector3();
+            bone.getWorldPosition(bonePos);
+            box.expandByPoint(bonePos);
+        }
+        const size = new THREE.Vector3();
+        box.getSize(size);
+        const center = new THREE.Vector3();
+        box.getCenter(center);
+        if (size.x !== 0 || size.y !== 0 || size.z !== 0) {
+            const desiredSize = 150;
+            const maxSize = Math.max(size.x, size.y, size.z);
+            let scaleFactor = 1;
+            if (maxSize > 0 && isFinite(maxSize)) {
+                scaleFactor = desiredSize / maxSize;
+            }
+            boneContainer.scale.set(scaleFactor, scaleFactor, scaleFactor);
+            const scaledCenterOffset = new THREE.Vector3().copy(center).multiplyScalar(scaleFactor);
+            boneContainer.position.sub(scaledCenterOffset);
+        }
+
+        scenes.push({
+            renderer,
+            scene,
+            camera,
+            controls,
+        });
+
+        const mixer = new THREE.AnimationMixer(result.skeleton.bones[0]);
+        mixer.clipAction(result.clip).setEffectiveWeight(1.0).play();
+        animationMixers.push(mixer);
+    });
+
+    window.addEventListener('resize', () => {
+        camera.aspect = container.clientWidth / container.clientHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(container.clientWidth, container.clientHeight);
+    }, false);
+}
+
+function animate() {
+    requestAnimationFrame(animate);
+    const delta = clock.getDelta();
+
+    if (animationMixers.length > 0) {
+        animationMixers.forEach(mixer => mixer.update(delta));
+    }
+    
+    scenes.forEach(s => {
+        s.controls.update();
+        s.renderer.render(s.scene, s.camera);
+    });
+}
+
+// --- Initialize ---
+const viewerLeft = document.getElementById('viewer-left');
+const viewerRight = document.getElementById('viewer-right');
+
+if (viewerLeft && viewerRight) {
+    setupViewer(viewerLeft);
+    setupViewer(viewerRight);
+    animate();
+}
+
+--- results/study_results.csv ---
+PID,SNO,R
+test,1,"modNo:1#buttonChoices:2,2,2,2,0,1,0,1,1,0,1,2,0,1,0,2,1#time:2.63#isreverse:0"
+test,2,"modNo:1#buttonChoices:2,2,2,1,0,2,0,0,0,2,2,0,0,0,1,0,1#time:1.75#isreverse:0"
+test,3,"modNo:1#buttonChoices:0,0,1,2,0,2,0,2,2,0,1,2,1,0,0,0,1#time:1.88#isreverse:1"
+test,4,"modNo:0#buttonChoices:0,1,0,2,0,0,2,1,1,1,2,2,0,0,1,0,2#time:1.96#isreverse:0"
+test2,1,"modNo:0#buttonChoices:2,0,0,2,2,2,1,1,1,0,0,0,0,2,2,2,1#time:9.18#isreverse:1"
+test2,2,"modNo:0#buttonChoices:0,2,2,2,2,2,2,2,2,2,0,2,0,2,2,2,0#time:4.02#isreverse:0"
+test2,3,"modNo:0#buttonChoices:2,0,0,1,1,2,2,2,0,0,2,2,0,0,0,2,0#time:11.59#isreverse:1"
+test2,4,"modNo:0#buttonChoices:0,2,2,0,1,1,2,1,2,0,1,0,2,2,1,2,1#time:7.16#isreverse:0"
+
+
+--- templates/trial.html ---
+{% extends "layout.html" %}
+
+{% block head_scripts %}
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "{{ url_for('static', filename='js/three.module.js') }}",
+            "OrbitControls": "{{ url_for('static', filename='js/OrbitControls.js') }}",
+            "BVHLoader": "{{ url_for('static', filename='js/BVHLoader.js') }}"
+        }
+    }
+    </script>
+{% endblock %}
+
+{% block content %}
+
+    <div class="viewer-container">
+        <div class="viewer">
+            <h3>Motion Left</h3>
+            <div id="viewer-left" class="viewer-canvas" data-bvh-file="{{ url_for('static', filename='bvh/' + motion_left) }}"></div>
+        </div>
+        <div class="viewer">
+            <h3>Motion Right</h3>
+            <div id="viewer-right" class="viewer-canvas" data-bvh-file="{{ url_for('static', filename='bvh/' + motion_right) }}"></div>
+        </div>
+    </div>
+
+    <form method="post" action="{{ url_for('run_trial', trial_num=trial_num) }}">
+        <h3>Questionnaire</h3>
+        <p>For each question, please choose which motion better represents the described personality trait or emotion.</p>
+
+        {% for i in range(1, 18) %}
+        <div class="question">
+            <p>{{ i }}. {{ questions[i-1] }}</p>
+            <div class="comparison-buttons">
+                <input id="q{{ i }}_left" type="radio" name="q{{ i }}" value="Left" required>
+                <label for="q{{ i }}_left">Left</label>
+
+                <input id="q{{ i }}_equal" type="radio" name="q{{ i }}" value="Equal">
+                <label for="q{{ i }}_equal">Equal</label>
+
+                <input id="q{{ i }}_right" type="radio" name="q{{ i }}" value="Right">
+                <label for="q{{ i }}_right">Right</label>
+            </div>
+        </div>
+        <hr>
+        {% endfor %}
+
+        <button type="button" id="random-answers-btn" style="background-color: #ffc107; color: #333; margin-top: 10px;">Random Answers (TESTING)</button>
+        <button type="submit">Submit and Continue to Next Trial</button>
+    </form>
+
+    <script type="module" src="{{ url_for('static', filename='js/visualization.js') }}"></script>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const randomAnswersBtn = document.getElementById('random-answers-btn');
+            if (randomAnswersBtn) {
+                randomAnswersBtn.addEventListener('click', function() {
+                    for (let i = 1; i <= 17; i++) {
+                        const options = ['Left', 'Equal', 'Right'];
+                        const randomChoice = options[Math.floor(Math.random() * options.length)];
+                        
+                        const radioBtn = document.getElementById(`q${i}_${randomChoice.toLowerCase()}`);
+                        if (radioBtn) {
+                            radioBtn.checked = true;
+                            radioBtn.dispatchEvent(new Event('change')); // Trigger change event for styling
+                        }
+                    }
+                });
+            }
+        });
+    </script>
+{% endblock %}
+
+--- templates/results.html ---
+{% extends "layout.html" %}
+
+{% block content %}
+    <div class="container">
+        <h2 style="text-align: center; margin-bottom: 20px;">Study Results</h2>
+        
+        {% if results %}
+            <a href="{{ url_for('download_csv') }}" class="download-btn">Download CSV</a>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            {% for col in header %}
+                                <th>{{ col }}</th>
+                            {% endfor %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in results %}
+                            <tr>
+                                {% for cell in row %}
+                                    <td>{{ cell }}</td>
+                                {% endfor %}
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <p>No results have been recorded yet.</p>
+        {% endif %}
+        
+        <a href="{{ url_for('user_study') }}" style="display: block; margin-top: 20px;">Back to Study Login</a>
+    </div>
+{% endblock %}
+
+--- templates/layout.html ---
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Motion User Study</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    {% block head_scripts %}{% endblock %}
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h2>Motion Perception Study</h2>
+        </header>
+        <main>
+            {% block content %}{% endblock %}
+        </main>
+        <!-- <footer>
+            <p>&copy; 2023 - Your Research Group</p>
+        </footer> -->
+    </div>
+</body>
+</html>
+
+--- templates/login.html ---
+{% extends "layout.html" %}
+
+{% block content %}
+    <h2>Welcome</h2>
+    <p>Please enter your Prolific ID to begin the study.</p>
+    
+    {% if error %}
+        <p class="error">{{ error }}</p>
+    {% endif %}
+
+    <form method="post" action="{{ url_for('user_study') }}">
+        <div class="form-group">
+            <label for="prolific_id">Prolific ID:</label>
+            <input type="text" id="prolific_id" name="prolific_id" required>
+        </div>
+        <button type="submit">Start Study</button>
+    </form>
+{% endblock %}
+
+--- templates/complete.html ---
+{% extends "layout.html" %}
+
+{% block content %}
+    <h2>Study Complete</h2>
+    <p>Thank you for your participation, {{ prolific_id }}!</p>
+    <p>Your responses have been recorded. You can now close this window.</p>
+    <p>Your completion code is: C123XYZ (or link back to Prolific).</p>
+{% endblock %}
