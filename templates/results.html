@@ -1,0 +1,35 @@
+{% extends "layout.html" %}
+
+{% block content %}
+    <div class="container">
+        <h2 style="text-align: center; margin-bottom: 20px;">Study Results</h2>
+        
+        {% if results %}
+            <a href="{{ url_for('download_csv') }}" class="download-btn">Download CSV</a>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            {% for col in header %}
+                                <th>{{ col }}</th>
+                            {% endfor %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in results %}
+                            <tr>
+                                {% for cell in row %}
+                                    <td>{{ cell }}</td>
+                                {% endfor %}
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <p>No results have been recorded yet.</p>
+        {% endif %}
+        
+        <a href="{{ url_for('user_study') }}" style="display: block; margin-top: 20px;">Back to Study Login</a>
+    </div>
+{% endblock %}

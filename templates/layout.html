@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Motion User Study</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    {% block head_scripts %}{% endblock %}
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h2>Motion Perception Study</h2>
+        </header>
+        <main>
+            {% block content %}{% endblock %}
+        </main>
+        <!-- <footer>
+            <p>&copy; 2023 - Your Research Group</p>
+        </footer> -->
+    </div>
+</body>
+</html>

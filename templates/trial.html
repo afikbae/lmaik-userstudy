@@ -1,0 +1,74 @@
+{% extends "layout.html" %}
+
+{% block head_scripts %}
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "{{ url_for('static', filename='js/three.module.js') }}",
+            "OrbitControls": "{{ url_for('static', filename='js/OrbitControls.js') }}",
+            "BVHLoader": "{{ url_for('static', filename='js/BVHLoader.js') }}"
+        }
+    }
+    </script>
+{% endblock %}
+
+{% block content %}
+
+    <div class="viewer-container">
+        <div class="viewer">
+            <h3>Motion Left</h3>
+            <div id="viewer-left" class="viewer-canvas" data-bvh-file="{{ url_for('static', filename='bvh/' + motion_left) }}"></div>
+        </div>
+        <div class="viewer">
+            <h3>Motion Right</h3>
+            <div id="viewer-right" class="viewer-canvas" data-bvh-file="{{ url_for('static', filename='bvh/' + motion_right) }}"></div>
+        </div>
+    </div>
+
+    <form method="post" action="{{ url_for('run_trial', trial_num=trial_num) }}">
+        <h3>Questionnaire</h3>
+        <p>For each question, please choose which motion better represents the described personality trait or emotion.</p>
+
+        {% for i in range(1, 18) %}
+        <div class="question">
+            <p>{{ i }}. {{ questions[i-1] }}</p>
+            <div class="comparison-buttons">
+                <input id="q{{ i }}_left" type="radio" name="q{{ i }}" value="Left" required>
+                <label for="q{{ i }}_left">Left</label>
+
+                <input id="q{{ i }}_equal" type="radio" name="q{{ i }}" value="Equal">
+                <label for="q{{ i }}_equal">Equal</label>
+
+                <input id="q{{ i }}_right" type="radio" name="q{{ i }}" value="Right">
+                <label for="q{{ i }}_right">Right</label>
+            </div>
+        </div>
+        <hr>
+        {% endfor %}
+
+        <button type="button" id="random-answers-btn" style="background-color: #ffc107; color: #333; margin-top: 10px;">Random Answers (TESTING)</button>
+        <button type="submit">Submit and Continue to Next Trial</button>
+    </form>
+
+    <script type="module" src="{{ url_for('static', filename='js/visualization.js') }}"></script>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const randomAnswersBtn = document.getElementById('random-answers-btn');
+            if (randomAnswersBtn) {
+                randomAnswersBtn.addEventListener('click', function() {
+                    for (let i = 1; i <= 17; i++) {
+                        const options = ['Left', 'Equal', 'Right'];
+                        const randomChoice = options[Math.floor(Math.random() * options.length)];
+                        
+                        const radioBtn = document.getElementById(`q${i}_${randomChoice.toLowerCase()}`);
+                        if (radioBtn) {
+                            radioBtn.checked = true;
+                            radioBtn.dispatchEvent(new Event('change')); // Trigger change event for styling
+                        }
+                    }
+                });
+            }
+        });
+    </script>
+{% endblock %}
