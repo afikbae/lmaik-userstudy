@@ -280,3 +280,20 @@ For issues or questions:
 2. Verify service status: `sudo /opt/riskoloji-analiz/status.sh`
 3. Review this documentation
 4. Check system resources and permissions 
+
+### 5. `undeploy.sh` - Undeployment Script
+**Purpose**: Completely remove the application and all its components from the machine.
+
+**Usage**:
+```bash
+# Run from the deployment directory
+sudo ./deployment-scripts/undeploy.sh
+```
+
+**What it does**:
+- Stops and disables the systemd service.
+- Removes the Nginx site configuration.
+- Deletes the application user (`lmaik`).
+- Deletes the application directory (`/opt/lmaik-userstudy`).
+- Deletes the log directory (`/var/log/lmaik-userstudy`).
+- Removes the firewall rule for Nginx.
