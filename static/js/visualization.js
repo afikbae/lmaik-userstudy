@@ -111,6 +111,16 @@ function setupViewer(container, modNo) { // <-- NEW: We're passing in modNo
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
 
+    // NEW: Add event listener for the reset button within this viewer
+    const resetButton = container.querySelector('.reset-camera-btn');
+    if (resetButton) {
+        resetButton.addEventListener('click', (e) => {
+            e.stopPropagation(); // prevent orbit controls from firing
+            camera.position.copy(cameraPos);
+            controls.target.copy(cameraTarget);
+        });
+    }
+
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
     scene.add(ambientLight);
     const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
@@ -151,6 +161,8 @@ function setupViewer(container, modNo) { // <-- NEW: We're passing in modNo
             scene,
             camera,
             controls,
+            initialCameraPos: cameraPos.clone(),
+            initialCameraTarget: cameraTarget.clone()
         });
 
         const mixer = new THREE.AnimationMixer(characterContainer);

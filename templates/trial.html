@@ -10,6 +10,38 @@
         }
     }
     </script>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        .viewer h3 {
+            margin-bottom: 5px; /* Add some space below the title */
+            margin-top: 0;
+        }
+        .viewer-canvas {
+            position: relative;
+        }
+        .reset-camera-btn {
+            position: absolute;
+            top: 0px;
+            left: 15px;
+            z-index: 10;
+            cursor: pointer;
+            background-color: rgba(0, 0, 0, 0.5);
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            font-size: 18px;
+            line-height: 30px;
+            text-align: center;
+            padding: 0;
+        }
+        .reset-camera-btn:hover {
+            background-color: rgba(0, 0, 0, 0.7);
+        }
+    </style>
 {% endblock %}
 
 {% block content %}
@@ -17,11 +49,15 @@
     <div class="viewer-container" data-mod-no="{{ mod_no }}">
         <div class="viewer">
             <h3>Motion Left</h3>
-            <div id="viewer-left" class="viewer-canvas" data-bvh-file="{{ url_for('static', filename='bvh/' + motion_left) }}"></div>
+            <div id="viewer-left" class="viewer-canvas" data-bvh-file="{{ url_for('static', filename='bvh/' + motion_left) }}">
+                <button class="reset-camera-btn">&#x21BB;</button>
+            </div>
         </div>
         <div class="viewer">
             <h3>Motion Right</h3>
-            <div id="viewer-right" class="viewer-canvas" data-bvh-file="{{ url_for('static', filename='bvh/' + motion_right) }}"></div>
+            <div id="viewer-right" class="viewer-canvas" data-bvh-file="{{ url_for('static', filename='bvh/' + motion_right) }}">
+                <button class="reset-camera-btn">&#x21BB;</button>
+            </div>
         </div>
     </div>
 
