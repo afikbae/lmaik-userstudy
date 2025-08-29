@@ -232,5 +232,10 @@ def download_csv():
         abort(404)
 
 
+@app.route('/bvh_pairs')
+def show_bvh_pairs():
+    return render_template('bvh_pairs.html', trial_categories=TRIAL_CATEGORIES)
+
+
 if __name__ == '__main__':
     app.run(debug=True)
