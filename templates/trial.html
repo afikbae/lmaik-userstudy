@@ -65,9 +65,10 @@
         <h3>Questionnaire</h3>
         <p>For each question, please choose which motion better represents the described personality trait or emotion.</p>
 
-        {% for i in range(1, 18) %}
+        {% for i in range(1, 20) %}
         <div class="question">
             <p>{{ i }}. {{ questions[i-1] }}</p>
+            {% if i <= 17 %}
             <div class="comparison-buttons">
                 <input id="q{{ i }}_left" type="radio" name="q{{ i }}" value="Left" required>
                 <label for="q{{ i }}_left">Left</label>
@@ -78,11 +79,29 @@
                 <input id="q{{ i }}_right" type="radio" name="q{{ i }}" value="Right">
                 <label for="q{{ i }}_right">Right</label>
             </div>
+            {% else %}
+            <div class="rating-buttons">
+                <input id="q{{ i }}_1" type="radio" name="q{{ i }}" value="1" required>
+                <label for="q{{ i }}_1">1</label>
+
+                <input id="q{{ i }}_2" type="radio" name="q{{ i }}" value="2">
+                <label for="q{{ i }}_2">2</label>
+
+                <input id="q{{ i }}_3" type="radio" name="q{{ i }}" value="3">
+                <label for="q{{ i }}_3">3</label>
+
+                <input id="q{{ i }}_4" type="radio" name="q{{ i }}" value="4">
+                <label for="q{{ i }}_4">4</label>
+
+                <input id="q{{ i }}_5" type="radio" name="q{{ i }}" value="5">
+                <label for="q{{ i }}_5">5</label>
+            </div>
+            {% endif %}
         </div>
         <hr>
         {% endfor %}
 
-        <!-- <button type="button" id="random-answers-btn" style="background-color: #ffc107; color: #333; margin-top: 10px;">Random Answers (TESTING)</button> -->
+        <button type="button" id="random-answers-btn" style="background-color: #ffc107; color: #333; margin-top: 10px;">Random Answers (TESTING)</button>
         <button type="submit">Submit and Continue to Next Trial</button>
     </form>
 
@@ -93,14 +112,24 @@
             const randomAnswersBtn = document.getElementById('random-answers-btn');
             if (randomAnswersBtn) {
                 randomAnswersBtn.addEventListener('click', function() {
-                    for (let i = 1; i <= 17; i++) {
-                        const options = ['Left', 'Equal', 'Right'];
-                        const randomChoice = options[Math.floor(Math.random() * options.length)];
-                        
-                        const radioBtn = document.getElementById(`q${i}_${randomChoice.toLowerCase()}`);
-                        if (radioBtn) {
-                            radioBtn.checked = true;
-                            radioBtn.dispatchEvent(new Event('change')); // Trigger change event for styling
+                    for (let i = 1; i <= 19; i++) {
+                        if (i <= 17) {
+                            const options = ['Left', 'Equal', 'Right'];
+                            const randomChoice = options[Math.floor(Math.random() * options.length)];
+                            
+                            const radioBtn = document.getElementById(`q${i}_${randomChoice.toLowerCase()}`);
+                            if (radioBtn) {
+                                radioBtn.checked = true;
+                                radioBtn.dispatchEvent(new Event('change')); // Trigger change event for styling
+                            }
+                        } else {
+                            const randomRating = Math.floor(Math.random() * 5) + 1;
+                            
+                            const radioBtn = document.getElementById(`q${i}_${randomRating}`);
+                            if (radioBtn) {
+                                radioBtn.checked = true;
+                                radioBtn.dispatchEvent(new Event('change')); // Trigger change event for styling
+                            }
                         }
                     }
                 });

@@ -29,6 +29,8 @@ QUESTIONS = [
     "Which motion appears angrier?",
     "Which motion appears more surprised?",
     "Which motion appears more human-like, natural?",
+    "Rate the human-likeness (realism) of the motion on the left (1: poor, 5: excellent)?",
+    "Rate the human-likeness (realism) of the motion on the right (1: poor, 5: excellent)?",
 ]
 
 # Define the pairs of motions, now grouped into categories (parts).
@@ -120,12 +122,19 @@ def run_trial(trial_num):
             'N/A': -1 # Should not happen due to 'required' attribute
         }
         answers_numerical = {}
-        for i in range(1, 18):
+        for i in range(1, 20):
             form_value = request.form.get(f'q{i}', 'N/A')
-            answers_numerical[f'q{i}'] = choice_mapping.get(form_value, -1)
+            if i <= 17:
+                answers_numerical[f'q{i}'] = choice_mapping.get(form_value, -1)
+            else:
+                # For rating questions (18, 19), store the rating value directly
+                try:
+                    answers_numerical[f'q{i}'] = int(form_value) if form_value != 'N/A' else -1
+                except ValueError:
+                    answers_numerical[f'q{i}'] = -1
         
         # Construct the 'R' string as per Realism Personality.html format
-        choices_string = ",".join(str(answers_numerical[f'q{i}']) for i in range(1, 18))
+        choices_string = ",".join(str(answers_numerical[f'q{i}']) for i in range(1, 20))
         
         # Convert is_reversed boolean to 0 or 1
         is_reversed_int = 1 if session.get('is_reversed', False) else 0
