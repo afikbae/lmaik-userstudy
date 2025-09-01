@@ -73,11 +73,6 @@ os.makedirs('results', exist_ok=True)
 
 @app.route('/')
 def index():
-    # Redirect to the main study page
-    return redirect(url_for('user_study'))
-
-@app.route('/userstudy', methods=['GET', 'POST'])
-def user_study():
     if request.method == 'POST':
         prolific_id = request.form.get('prolific_id')
         if not prolific_id:
