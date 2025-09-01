@@ -8,8 +8,8 @@
         <p class="error">{{ error }}</p>
     {% endif %}
 
-    <form method="post" action="{{ url_for('user_study') }}">
-        <div class="form-group">
+    <form method="post" action="{{ url_for('index') }}">
+          <div class="form-group">
             <label for="prolific_id">Prolific ID:</label>
             <input type="text" id="prolific_id" name="prolific_id" required>
         </div>

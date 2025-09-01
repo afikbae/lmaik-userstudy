@@ -71,7 +71,8 @@ os.makedirs('results', exist_ok=True)
 
 # --- Routes ---
 
-@app.route('/')
+# <-- CHANGED: The root route '/' now handles both GET and POST requests.
+@app.route('/', methods=['GET', 'POST'])
 def index():
     if request.method == 'POST':
         prolific_id = request.form.get('prolific_id')
@@ -81,20 +82,21 @@ def index():
         session['prolific_id'] = prolific_id
         session['current_trial'] = 1 # Start with the first trial
         
-        # You could also shuffle your trial pairs here if needed
-        # random.shuffle(TRIAL_PAIRS) 
-        # session['trial_pairs'] = TRIAL_PAIRS
-        
         return redirect(url_for('run_trial', trial_num=1))
         
     # On GET, just show the login page
     return render_template('login.html')
 
+# <-- REMOVED: The old @app.route('/userstudy') function is gone.
+#     The logic has been merged into the index() function above.
+
+
 @app.route('/trial/<int:trial_num>', methods=['GET', 'POST'])
 def run_trial(trial_num):
     # Security checks: ensure user has a session and is on the correct trial
     if 'prolific_id' not in session:
-        return redirect(url_for('user_study'))
+        # <-- CHANGED: Redirect to 'index' instead of 'user_study'
+        return redirect(url_for('index'))
     if trial_num != session.get('current_trial'):
         # Prevent users from skipping trials or going back
         return redirect(url_for('run_trial', trial_num=session['current_trial']))
