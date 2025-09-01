@@ -173,7 +173,7 @@ log "Creating Nginx configuration..."
 sudo tee /etc/nginx/sites-available/$NGINX_SITE > /dev/null <<EOF
 server {
     listen 80;
-    server_name _;
+    server_name userstudy.afikbae.com;
 
     # Allow very large uploads (0 disables size checking in Nginx)
     client_max_body_size 0;
