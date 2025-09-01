@@ -70,7 +70,7 @@
             <p>{{ i }}. {{ questions[i-1] }}</p>
             {% if i <= 17 %}
             <div class="comparison-buttons">
-                <input id="q{{ i }}_left" type="radio" name="q{{ i }}" value="Left" required>
+                <input id="q{{ i }}_left" type="radio" name="q{{ i }}" value="Left">
                 <label for="q{{ i }}_left">Left</label>
 
                 <input id="q{{ i }}_equal" type="radio" name="q{{ i }}" value="Equal">
@@ -81,7 +81,7 @@
             </div>
             {% else %}
             <div class="rating-buttons">
-                <input id="q{{ i }}_1" type="radio" name="q{{ i }}" value="1" required>
+                <input id="q{{ i }}_1" type="radio" name="q{{ i }}" value="1">
                 <label for="q{{ i }}_1">1</label>
 
                 <input id="q{{ i }}_2" type="radio" name="q{{ i }}" value="2">
@@ -102,6 +102,7 @@
         {% endfor %}
 
         <!-- <button type="button" id="random-answers-btn" style="background-color: #ffc107; color: #333; margin-top: 10px;">Random Answers (TESTING)</button> -->
+                <div id="error-message" style="color: red; margin-top: 10px; display: none;"></div>
         <button type="submit">Submit and Continue to Next Trial</button>
     </form>
 
@@ -109,6 +110,28 @@
 
     <script>
         document.addEventListener('DOMContentLoaded', function() {
+            const form = document.querySelector('form');
+            const errorMessage = document.getElementById('error-message');
+
+            form.addEventListener('submit', function(event) {
+                let allAnswered = true;
+                for (let i = 1; i <= 19; i++) {
+                    const question = document.querySelector(`input[name="q${i}"]:checked`);
+                    if (!question) {
+                        allAnswered = false;
+                        break;
+                    }
+                }
+
+                if (!allAnswered) {
+                    event.preventDefault();
+                    errorMessage.textContent = 'Please answer all questions before submitting.';
+                    errorMessage.style.display = 'block';
+                } else {
+                    errorMessage.style.display = 'none';
+                }
+            });
+
             const randomAnswersBtn = document.getElementById('random-answers-btn');
             if (randomAnswersBtn) {
                 randomAnswersBtn.addEventListener('click', function() {
