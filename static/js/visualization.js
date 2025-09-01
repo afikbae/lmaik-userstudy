@@ -93,7 +93,7 @@ function setupViewer(container, modNo) { // <-- NEW: We're passing in modNo
             break;
         case 3: // For the fourth pair in any category list
             // Example: A low-angle view
-            cameraPos.set(20, 130, 150);
+            cameraPos.set(150, 150, 50);
             break;
         default:
             // Uses the default cameraPos defined above for any other mod_no
