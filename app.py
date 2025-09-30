@@ -243,5 +243,168 @@ def show_bvh_pairs():
     return render_template('bvh_pairs.html', trial_categories=TRIAL_CATEGORIES)
 
 
+@app.route('/mpjpe')
+def show_mpjpe():
+    return render_template('mpjpe.html', trial_categories=TRIAL_CATEGORIES)
+
+
+@app.route('/test_mpjpe')
+def test_mpjpe():
+    """Test endpoint to calculate MPJPE using Python backend"""
+    from bvh_parser import calculate_mpjpe
+    import os
+    from flask import jsonify
+
+    # Test with first pair from each category
+    test_pairs = [
+        ('walk-low-weight.bvh', 'walk-high-weight.bvh'),
+        ('walk-low-space.bvh', 'walk-high-space.bvh'),
+        ('walk-low-time.bvh', 'walk-high-time.bvh'),
+        ('walk-low-flow.bvh', 'walk-high-flow.bvh'),
+    ]
+
+    results = []
+
+    for left, right in test_pairs:
+        left_path = os.path.join('static', 'bvh', left)
+        right_path = os.path.join('static', 'bvh', right)
+
+        try:
+            result = calculate_mpjpe(left_path, right_path)
+            results.append({
+                'pair': f"{left} vs {right}",
+                'mpjpe': round(result['mpjpe'], 4),
+                'num_frames': result['num_frames'],
+                'num_joints': result['num_joints'],
+                'duration': round(result['duration'], 2),
+                'min_error': round(result['min_error'], 4),
+                'max_error': round(result['max_error'], 4),
+                'first_frame_error': round(result['frame_errors'][0], 4) if result['frame_errors'] else 0,
+                'last_frame_error': round(result['frame_errors'][-1], 4) if result['frame_errors'] else 0,
+            })
+        except Exception as e:
+            results.append({
+                'pair': f"{left} vs {right}",
+                'error': str(e)
+            })
+
+    return jsonify(results)
+
+
+@app.route('/test_mpjpe_identical')
+def test_mpjpe_identical():
+    """Test MPJPE with identical files (should return ~0)"""
+    from bvh_parser import calculate_mpjpe
+    import os
+    from flask import jsonify
+
+    # Test with same file compared to itself
+    test_files = [
+        'walk-low-weight.bvh',
+        'wave-high-space.bvh',
+        'sit-low-time.bvh',
+    ]
+
+    results = []
+
+    for filename in test_files:
+        filepath = os.path.join('static', 'bvh', filename)
+
+        try:
+            result = calculate_mpjpe(filepath, filepath)
+            results.append({
+                'file': filename,
+                'mpjpe': round(result['mpjpe'], 10),  # More precision for near-zero values
+                'num_frames': result['num_frames'],
+                'num_joints': result['num_joints'],
+                'max_error': round(result['max_error'], 10),
+                'note': 'PASS - Near zero' if result['mpjpe'] < 0.001 else 'FAIL - Should be near zero'
+            })
+        except Exception as e:
+            results.append({
+                'file': filename,
+                'error': str(e)
+            })
+
+    return jsonify(results)
+
+
+@app.route('/test_single_pair')
+def test_single_pair():
+    """Test a single pair with detailed frame-by-frame output"""
+    from bvh_parser import calculate_mpjpe
+    import os
+    from flask import jsonify, request
+
+    left = request.args.get('left', 'walk-low-time.bvh')
+    right = request.args.get('right', 'walk-high-time.bvh')
+
+    left_path = os.path.join('static', 'bvh', left)
+    right_path = os.path.join('static', 'bvh', right)
+
+    try:
+        result = calculate_mpjpe(left_path, right_path)
+
+        # Return first 10 frame errors for debugging
+        frame_sample = result['frame_errors'][:10] if len(result['frame_errors']) > 10 else result['frame_errors']
+
+        return jsonify({
+            'pair': f"{left} vs {right}",
+            'mpjpe': round(result['mpjpe'], 6),
+            'num_frames': result['num_frames'],
+            'num_joints': result['num_joints'],
+            'duration': round(result['duration'], 2),
+            'min_error': round(result['min_error'], 6),
+            'max_error': round(result['max_error'], 6),
+            'first_10_frame_errors': [round(e, 6) for e in frame_sample],
+            'python_calculation': 'This is the Python backend ground truth'
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/test_all_pairs_python')
+def test_all_pairs_python():
+    """Calculate MPJPE for ALL pairs using Python - for comparison with JS"""
+    from bvh_parser import calculate_mpjpe
+    import os
+    from flask import jsonify
+
+    results = []
+
+    for cat_idx, category in enumerate(TRIAL_CATEGORIES, 1):
+        for pair_idx, pair in enumerate(category, 1):
+            left_path = os.path.join('static', 'bvh', pair[0])
+            right_path = os.path.join('static', 'bvh', pair[1])
+
+            try:
+                result = calculate_mpjpe(left_path, right_path)
+                results.append({
+                    'category': cat_idx,
+                    'pair': pair_idx,
+                    'left': pair[0],
+                    'right': pair[1],
+                    'mpjpe': round(result['mpjpe'], 6),
+                    'frames': result['num_frames'],
+                    'joints': result['num_joints']
+                })
+            except Exception as e:
+                results.append({
+                    'category': cat_idx,
+                    'pair': pair_idx,
+                    'left': pair[0],
+                    'right': pair[1],
+                    'error': str(e)
+                })
+
+    return jsonify(results)
+
+
+@app.route('/mpjpe_test')
+def mpjpe_test():
+    """Test page to compare Python vs JavaScript MPJPE calculations"""
+    return render_template('mpjpe_test.html')
+
+
 if __name__ == '__main__':
     app.run(debug=True)

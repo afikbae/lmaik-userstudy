@@ -1,0 +1,323 @@
+{% extends "layout.html" %}
+
+{% block head_scripts %}
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "{{ url_for('static', filename='js/three.module.js') }}",
+            "OrbitControls": "{{ url_for('static', filename='js/OrbitControls.js') }}",
+            "BVHLoader": "{{ url_for('static', filename='js/BVHLoader.js') }}"
+        }
+    }
+    </script>
+    <style>
+        .mpjpe-results {
+            padding: 20px;
+            margin-top: 20px;
+        }
+        .mpjpe-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        .mpjpe-table th,
+        .mpjpe-table td {
+            border: 1px solid #ddd;
+            padding: 12px;
+            text-align: left;
+        }
+        .mpjpe-table th {
+            background-color: #007bff;
+            color: white;
+            font-weight: bold;
+        }
+        .mpjpe-table tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+        .mpjpe-table tr:hover {
+            background-color: #f0f8ff;
+        }
+        .mpjpe-value {
+            font-weight: bold;
+            color: #007bff;
+        }
+        .calculating {
+            color: #666;
+            font-style: italic;
+        }
+        .loading-indicator {
+            background-color: #f0f8ff;
+            border: 2px solid #007bff;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 30px;
+            background-color: #e0e0e0;
+            border-radius: 15px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+        .progress-bar-fill {
+            height: 100%;
+            background-color: #007bff;
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+        .loading-indicator.hidden {
+            display: none;
+        }
+    </style>
+{% endblock %}
+
+{% block content %}
+<h2>MPJPE (Mean Per Joint Position Error) Analysis</h2>
+
+<div class="mpjpe-results">
+    <div id="loading-indicator" class="loading-indicator">
+        <p>Calculating MPJPE for all pairs... <span id="progress-text">0/16</span></p>
+        <div class="progress-bar">
+            <div id="progress-bar-fill" class="progress-bar-fill"></div>
+        </div>
+    </div>
+
+    <h3>MPJPE Results Table</h3>
+    <table class="mpjpe-table">
+        <thead>
+            <tr>
+                <th>Category</th>
+                <th>Pair</th>
+                <th>Left Motion</th>
+                <th>Right Motion</th>
+                <th>MPJPE</th>
+            </tr>
+        </thead>
+        <tbody id="mpjpe-table-body">
+            {% for category in trial_categories %}
+                {% set category_index = loop.index %}
+                {% for pair in category %}
+                <tr data-category="{{ category_index }}"
+                    data-pair="{{ loop.index }}"
+                    data-left="{{ pair[0] }}"
+                    data-right="{{ pair[1] }}"
+                    data-left-file="{{ url_for('static', filename='bvh/' + pair[0]) }}"
+                    data-right-file="{{ url_for('static', filename='bvh/' + pair[1]) }}">
+                    <td>{{ category_index }}</td>
+                    <td>{{ loop.index }}</td>
+                    <td>{{ pair[0] }}</td>
+                    <td>{{ pair[1] }}</td>
+                    <td class="mpjpe-cell" data-pair-id="cat{{ category_index }}-pair{{ loop.index }}">
+                        <span class="calculating">Calculating...</span>
+                    </td>
+                </tr>
+                {% endfor %}
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { BVHLoader } from 'BVHLoader';
+
+function getAllJointPositions(bone) {
+    const positions = [];
+
+    // Recursively collect all joint positions
+    function traverse(b) {
+        // Get world position of this joint
+        const worldPos = new THREE.Vector3();
+        b.getWorldPosition(worldPos);
+        positions.push(worldPos);
+
+        // Process child bones
+        b.children.forEach((child) => {
+            if (child.isBone) {
+                traverse(child);
+            }
+        });
+    }
+
+    traverse(bone);
+    return positions;
+}
+
+function calculateMPJPE(leftData, rightData) {
+    const leftClip = leftData.clip;
+    const rightClip = rightData.clip;
+
+    // Get the shorter duration to ensure we compare overlapping frames
+    const duration = Math.min(leftClip.duration, rightClip.duration);
+    const fps = 30; // Sample at 30 fps
+    const numFrames = Math.floor(duration * fps);
+    const frameDuration = 1.0 / fps;
+
+    let totalErrorSum = 0;
+    let frameCount = 0;
+    const frameErrors = [];
+
+    // Sample at regular intervals
+    for (let frame = 0; frame < numFrames; frame++) {
+        const targetTime = frame * frameDuration;
+
+        // Clone fresh skeletons for each frame
+        const leftSkeletonClone = leftData.skeleton.clone();
+        const rightSkeletonClone = rightData.skeleton.clone();
+
+        // Create containers and mixers for this frame
+        const leftContainer = new THREE.Group();
+        leftContainer.add(leftSkeletonClone.bones[0]);
+        const leftMixer = new THREE.AnimationMixer(leftSkeletonClone.bones[0]);
+        const leftAction = leftMixer.clipAction(leftClip);
+        leftAction.play();
+        leftAction.time = targetTime;
+        leftMixer.update(0);  // Apply the time we just set
+
+        const rightContainer = new THREE.Group();
+        rightContainer.add(rightSkeletonClone.bones[0]);
+        const rightMixer = new THREE.AnimationMixer(rightSkeletonClone.bones[0]);
+        const rightAction = rightMixer.clipAction(rightClip);
+        rightAction.play();
+        rightAction.time = targetTime;
+        rightMixer.update(0);  // Apply the time we just set
+
+        // Force update of world matrices
+        leftContainer.updateMatrixWorld(true);
+        rightContainer.updateMatrixWorld(true);
+
+        // Get all joint positions for both skeletons at this frame
+        const leftPositions = getAllJointPositions(leftSkeletonClone.bones[0]);
+        const rightPositions = getAllJointPositions(rightSkeletonClone.bones[0]);
+
+        // Ensure same number of joints
+        const numJoints = Math.min(leftPositions.length, rightPositions.length);
+
+        if (numJoints === 0) {
+            console.warn(`Frame ${frame}: No joints found`);
+            continue;
+        }
+
+        // Calculate mean error for this frame (average across all joints)
+        let frameError = 0;
+        for (let j = 0; j < numJoints; j++) {
+            const distance = leftPositions[j].distanceTo(rightPositions[j]);
+            frameError += distance;
+        }
+
+        // Average per joint for this frame
+        const frameMeanError = frameError / numJoints;
+        totalErrorSum += frameMeanError;
+        frameCount++;
+        frameErrors.push(frameMeanError);
+    }
+
+    // Calculate MPJPE: mean across all frames
+    const mpjpe = frameCount > 0 ? totalErrorSum / frameCount : 0;
+
+    return mpjpe;
+}
+
+function loadBVHPair(leftFile, rightFile, pairId, onComplete) {
+    const loader = new BVHLoader();
+    let leftData = null;
+    let rightData = null;
+    let loadedCount = 0;
+
+    const checkComplete = () => {
+        if (loadedCount === 2 && leftData && rightData) {
+            // Pass the original data, let calculateMPJPE handle cloning
+            const mpjpe = calculateMPJPE(
+                leftData,
+                rightData
+            );
+
+            onComplete(mpjpe);
+        }
+    };
+
+    loader.load(leftFile, (result) => {
+        leftData = result;
+        loadedCount++;
+        checkComplete();
+    }, undefined, (error) => {
+        console.error(`Error loading ${leftFile}:`, error);
+    });
+
+    loader.load(rightFile, (result) => {
+        rightData = result;
+        loadedCount++;
+        checkComplete();
+    }, undefined, (error) => {
+        console.error(`Error loading ${rightFile}:`, error);
+    });
+}
+
+// Initialize - calculate all pairs automatically
+document.addEventListener('DOMContentLoaded', function() {
+    const rows = document.querySelectorAll('#mpjpe-table-body tr');
+    const totalPairs = rows.length;
+    let completedPairs = 0;
+
+    const progressText = document.getElementById('progress-text');
+    const progressBarFill = document.getElementById('progress-bar-fill');
+    const loadingIndicator = document.getElementById('loading-indicator');
+
+    rows.forEach((row) => {
+        const leftFile = row.dataset.leftFile;
+        const rightFile = row.dataset.rightFile;
+        const categoryNum = row.dataset.category;
+        const pairNum = row.dataset.pair;
+        const pairId = `cat${categoryNum}-pair${pairNum}`;
+        const cell = row.querySelector(`[data-pair-id="${pairId}"]`);
+
+        loadBVHPair(leftFile, rightFile, pairId, (mpjpe) => {
+            // Display the result
+            if (cell) {
+                cell.innerHTML = `<span class="mpjpe-value">${mpjpe.toFixed(4)}</span>`;
+            }
+
+            // Update progress
+            completedPairs++;
+            progressText.textContent = `${completedPairs}/${totalPairs}`;
+            const progressPercent = (completedPairs / totalPairs) * 100;
+            progressBarFill.style.width = `${progressPercent}%`;
+
+            // Hide loading indicator when all done
+            if (completedPairs === totalPairs) {
+                setTimeout(() => {
+                    loadingIndicator.classList.add('hidden');
+                }, 500);
+            }
+        });
+    });
+
+    // Add window function to export results for testing
+    window.getJSResults = function() {
+        const results = [];
+        rows.forEach(row => {
+            const category = parseInt(row.dataset.category);
+            const pair = parseInt(row.dataset.pair);
+            const cell = row.querySelector('.mpjpe-cell');
+            const mpjpeText = cell.textContent.trim();
+            const mpjpe = parseFloat(mpjpeText);
+
+            if (!isNaN(mpjpe)) {
+                results.push({
+                    category,
+                    pair,
+                    left: row.dataset.left,
+                    right: row.dataset.right,
+                    mpjpe
+                });
+            }
+        });
+        return results;
+    };
+
+    console.log('MPJPE calculations complete. Run window.getJSResults() to export data for comparison.');
+});
+</script>
+{% endblock %}
