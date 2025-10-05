@@ -101,8 +101,8 @@
         <hr>
         {% endfor %}
 
-        <!-- <button type="button" id="random-answers-btn" style="background-color: #ffc107; color: #333; margin-top: 10px;">Random Answers (TESTING)</button> -->
-                <div id="error-message" style="color: red; margin-top: 10px; display: none;"></div>
+        <!-- <button type="button" id="random-answers-btn" style="background-color: #ffc107; color: #333; margin-top: 10px;">🎲 Random & Submit (DEBUG)</button> -->
+        <div id="error-message" style="color: red; margin-top: 10px; display: none;"></div>
         <button type="submit">Submit and Continue to Next Trial</button>
     </form>
 
@@ -135,11 +135,12 @@
             const randomAnswersBtn = document.getElementById('random-answers-btn');
             if (randomAnswersBtn) {
                 randomAnswersBtn.addEventListener('click', function() {
+                    // Fill in random answers
                     for (let i = 1; i <= 19; i++) {
                         if (i <= 17) {
                             const options = ['Left', 'Equal', 'Right'];
                             const randomChoice = options[Math.floor(Math.random() * options.length)];
-                            
+
                             const radioBtn = document.getElementById(`q${i}_${randomChoice.toLowerCase()}`);
                             if (radioBtn) {
                                 radioBtn.checked = true;
@@ -147,7 +148,7 @@
                             }
                         } else {
                             const randomRating = Math.floor(Math.random() * 5) + 1;
-                            
+
                             const radioBtn = document.getElementById(`q${i}_${randomRating}`);
                             if (radioBtn) {
                                 radioBtn.checked = true;
@@ -155,6 +156,11 @@
                             }
                         }
                     }
+
+                    // Auto-submit the form after filling answers
+                    setTimeout(() => {
+                        form.submit();
+                    }, 100);
                 });
             }
         });

@@ -34,7 +34,6 @@ QUESTIONS = [
 ]
 
 # Define the pairs of motions, now grouped into categories (parts).
-# Each trial will randomly select one pair from its corresponding category.
 TRIAL_CATEGORIES = [
     [
         ('walk-low-weight.bvh', 'walk-high-weight.bvh'),
@@ -61,9 +60,13 @@ TRIAL_CATEGORIES = [
         ('put-low-flow.bvh', 'put-high-flow.bvh'),
     ],
 ]
-# For a real study, you would populate these with the actual BVH file pairs for each category.
 
-TOTAL_TRIALS = len(TRIAL_CATEGORIES)
+# Flatten all pairs into a single list for all participants to see all 16 pairs
+ALL_PAIRS = []
+for category in TRIAL_CATEGORIES:
+    ALL_PAIRS.extend(category)
+
+TOTAL_TRIALS = len(ALL_PAIRS)
 RESULTS_FILE = os.path.join('results', 'study_results.csv')
 
 # Ensure the results directory exists
@@ -82,8 +85,8 @@ def index():
         session['prolific_id'] = prolific_id
         session['current_trial'] = 1 # Start with the first trial
 
-        # Randomize the order of trial categories for this participant
-        session['trial_order'] = random.sample(range(len(TRIAL_CATEGORIES)), len(TRIAL_CATEGORIES))
+        # Randomize the order of all pairs for this participant
+        session['trial_order'] = random.sample(range(len(ALL_PAIRS)), len(ALL_PAIRS))
 
         return redirect(url_for('run_trial', trial_num=1))
 
@@ -176,20 +179,20 @@ def run_trial(trial_num):
     trial_order = session.get('trial_order')
     if not trial_order:
         # Fallback if session was lost - randomize again
-        trial_order = random.sample(range(len(TRIAL_CATEGORIES)), len(TRIAL_CATEGORIES))
+        trial_order = random.sample(range(len(ALL_PAIRS)), len(ALL_PAIRS))
         session['trial_order'] = trial_order
 
-    # Get the actual category index for this trial based on the randomized order
-    category_index = trial_order[trial_num - 1]
-    category_pairs = TRIAL_CATEGORIES[category_index]
+    # Get the actual pair index for this trial based on the randomized order
+    pair_index = trial_order[trial_num - 1]
+    motion_pair_for_trial = ALL_PAIRS[pair_index]
+
+    # Determine which category and mod_no this pair belongs to for recording purposes
+    category_index = pair_index // 4  # 0-3
+    mod_no = pair_index % 4  # 0-3
 
     # Store the actual SNO (category index + 1 for 1-based indexing) for recording
     session['current_sno'] = category_index + 1
-
-    # Randomly select a pair from the category and store its index
-    mod_no = random.randrange(len(category_pairs))
     session['current_mod_no'] = mod_no
-    motion_pair_for_trial = category_pairs[mod_no]
 
     # Randomly decide whether to swap the motions and store the decision
     motion_left, motion_right = motion_pair_for_trial
