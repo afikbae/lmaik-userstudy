@@ -1,0 +1,223 @@
+{% extends "layout.html" %}
+
+{% block head_scripts %}
+<style>
+    body {
+        font-family: Arial, sans-serif;
+        padding: 20px;
+    }
+    .test-container {
+        max-width: 1400px;
+        margin: 0 auto;
+    }
+    .status {
+        padding: 20px;
+        margin: 20px 0;
+        border-radius: 8px;
+        font-size: 18px;
+        font-weight: bold;
+    }
+    .status.loading {
+        background-color: #fff3cd;
+        border: 2px solid #ffc107;
+    }
+    .status.complete {
+        background-color: #d4edda;
+        border: 2px solid #28a745;
+    }
+    .comparison-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 20px 0;
+    }
+    .comparison-table th,
+    .comparison-table td {
+        border: 1px solid #ddd;
+        padding: 12px;
+        text-align: left;
+    }
+    .comparison-table th {
+        background-color: #007bff;
+        color: white;
+        font-weight: bold;
+    }
+    .comparison-table tr:nth-child(even) {
+        background-color: #f9f9f9;
+    }
+    .diff {
+        font-weight: bold;
+    }
+    .diff.good {
+        color: #28a745;
+    }
+    .diff.warning {
+        color: #ffc107;
+    }
+    .diff.bad {
+        color: #dc3545;
+    }
+    .summary {
+        padding: 20px;
+        background-color: #e7f3ff;
+        border-radius: 8px;
+        margin: 20px 0;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="test-container">
+    <h1>MPJPE Calculation Verification</h1>
+    <p>This page compares Python (ground truth) vs JavaScript (Three.js) MPJPE calculations for all pairs.</p>
+
+    <div id="status" class="status loading">
+        Loading Python reference values...
+    </div>
+
+    <div id="summary" class="summary" style="display: none;">
+        <h3>Summary Statistics</h3>
+        <p><strong>Average Difference:</strong> <span id="avg-diff"></span>%</p>
+        <p><strong>Max Difference:</strong> <span id="max-diff"></span>%</p>
+        <p><strong>Pairs with >2% difference:</strong> <span id="bad-count"></span></p>
+    </div>
+
+    <table class="comparison-table">
+        <thead>
+            <tr>
+                <th>Category</th>
+                <th>Pair</th>
+                <th>Left Motion</th>
+                <th>Right Motion</th>
+                <th>Python MPJPE</th>
+                <th>JavaScript MPJPE</th>
+                <th>Difference (%)</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody id="results-body">
+        </tbody>
+    </table>
+</div>
+
+<script>
+let pythonResults = [];
+let jsResults = [];
+
+// Fetch Python results
+fetch('/test_all_pairs_python')
+    .then(response => response.json())
+    .then(data => {
+        pythonResults = data;
+        document.getElementById('status').textContent = 'Python values loaded. Fetching JavaScript values from /mpjpe page...';
+
+        // Now fetch the page to get JS values
+        fetchJSResults();
+    })
+    .catch(error => {
+        document.getElementById('status').textContent = 'Error loading Python results: ' + error;
+        document.getElementById('status').className = 'status bad';
+    });
+
+function fetchJSResults() {
+    // We need to scrape the MPJPE page table
+    fetch('/mpjpe')
+        .then(response => response.text())
+        .then(html => {
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(html, 'text/html');
+
+            // Wait a bit for the page to potentially calculate values
+            // For now, we'll extract from the rendered table
+            // Better: make a separate endpoint that returns JS calculations
+
+            document.getElementById('status').textContent = 'Please open /mpjpe page in another tab and wait for calculations to complete, then come back here.';
+            document.getElementById('status').className = 'status warning';
+
+            // For now, just show Python results
+            displayResults();
+        });
+}
+
+function displayResults() {
+    const tbody = document.getElementById('results-body');
+    tbody.innerHTML = '';
+
+    pythonResults.forEach(result => {
+        const row = document.createElement('tr');
+
+        row.innerHTML = `
+            <td>${result.category}</td>
+            <td>${result.pair}</td>
+            <td>${result.left}</td>
+            <td>${result.right}</td>
+            <td>${result.mpjpe !== undefined ? result.mpjpe.toFixed(6) : 'Error'}</td>
+            <td class="js-value" data-cat="${result.category}" data-pair="${result.pair}">-</td>
+            <td class="diff-value">-</td>
+            <td class="status-value">Waiting for JS</td>
+        `;
+
+        tbody.appendChild(row);
+    });
+
+    document.getElementById('status').textContent = 'Python results loaded. Open the console and paste the JS results.';
+}
+
+// Function to manually input JS results for comparison
+window.setJSResult = function(category, pair, mpjpe) {
+    const cell = document.querySelector(`.js-value[data-cat="${category}"][data-pair="${pair}"]`);
+    if (!cell) return;
+
+    const row = cell.parentElement;
+    const pythonValue = parseFloat(row.children[4].textContent);
+
+    cell.textContent = mpjpe.toFixed(6);
+
+    const diffPercent = Math.abs((mpjpe - pythonValue) / pythonValue * 100);
+    const diffCell = row.querySelector('.diff-value');
+    const statusCell = row.querySelector('.status-value');
+
+    diffCell.textContent = diffPercent.toFixed(2) + '%';
+
+    if (diffPercent < 1) {
+        diffCell.className = 'diff-value diff good';
+        statusCell.textContent = '✓ Excellent';
+        statusCell.style.color = '#28a745';
+    } else if (diffPercent < 2) {
+        diffCell.className = 'diff-value diff warning';
+        statusCell.textContent = '⚠ Acceptable';
+        statusCell.style.color = '#ffc107';
+    } else {
+        diffCell.className = 'diff-value diff bad';
+        statusCell.textContent = '✗ Check this';
+        statusCell.style.color = '#dc3545';
+    }
+
+    updateSummary();
+};
+
+function updateSummary() {
+    const diffs = Array.from(document.querySelectorAll('.diff-value'))
+        .map(cell => {
+            const text = cell.textContent;
+            return text !== '-' ? parseFloat(text) : null;
+        })
+        .filter(v => v !== null);
+
+    if (diffs.length === 0) return;
+
+    const avgDiff = diffs.reduce((a, b) => a + b, 0) / diffs.length;
+    const maxDiff = Math.max(...diffs);
+    const badCount = diffs.filter(d => d > 2).length;
+
+    document.getElementById('avg-diff').textContent = avgDiff.toFixed(3);
+    document.getElementById('max-diff').textContent = maxDiff.toFixed(3);
+    document.getElementById('bad-count').textContent = badCount;
+    document.getElementById('summary').style.display = 'block';
+
+    if (diffs.length === pythonResults.length) {
+        document.getElementById('status').textContent = `Complete! Average difference: ${avgDiff.toFixed(3)}%`;
+        document.getElementById('status').className = 'status complete';
+    }
+}
+</script>
+{% endblock %}

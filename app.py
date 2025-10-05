@@ -78,12 +78,15 @@ def index():
         prolific_id = request.form.get('prolific_id')
         if not prolific_id:
             return render_template('login.html', error="Prolific ID cannot be empty.")
-        
+
         session['prolific_id'] = prolific_id
         session['current_trial'] = 1 # Start with the first trial
-        
+
+        # Randomize the order of trial categories for this participant
+        session['trial_order'] = random.sample(range(len(TRIAL_CATEGORIES)), len(TRIAL_CATEGORIES))
+
         return redirect(url_for('run_trial', trial_num=1))
-        
+
     # On GET, just show the login page
     return render_template('login.html')
 
@@ -145,7 +148,7 @@ def run_trial(trial_num):
 
         row = {
             'PID': session['prolific_id'],
-            'SNO': trial_num, # SNO seems to be the trial number/category
+            'SNO': session.get('current_sno', trial_num), # SNO is the actual category index (randomized)
             'R': r_string
         }
         
@@ -169,9 +172,20 @@ def run_trial(trial_num):
     # Store trial start time in session
     session['trial_start_time'] = datetime.now().isoformat()
 
-    # Get the category of pairs for the current trial
-    category_pairs = TRIAL_CATEGORIES[trial_num - 1]
-    
+    # Get the randomized trial order for this participant
+    trial_order = session.get('trial_order')
+    if not trial_order:
+        # Fallback if session was lost - randomize again
+        trial_order = random.sample(range(len(TRIAL_CATEGORIES)), len(TRIAL_CATEGORIES))
+        session['trial_order'] = trial_order
+
+    # Get the actual category index for this trial based on the randomized order
+    category_index = trial_order[trial_num - 1]
+    category_pairs = TRIAL_CATEGORIES[category_index]
+
+    # Store the actual SNO (category index + 1 for 1-based indexing) for recording
+    session['current_sno'] = category_index + 1
+
     # Randomly select a pair from the category and store its index
     mod_no = random.randrange(len(category_pairs))
     session['current_mod_no'] = mod_no
